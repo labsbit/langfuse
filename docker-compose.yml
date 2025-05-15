@@ -66,8 +66,8 @@ services:
     image: langfuse/langfuse:3
     restart: always
     depends_on: *langfuse-depends-on
-    # ports:
-    #   - 3000:3000
+    ports:
+      - 3000:3000
     environment:
       <<: *langfuse-worker-env
       NEXTAUTH_URL: http://localhost:3000 # User needs to update this for reverse proxy
