@@ -1,6 +1,6 @@
-import { clickhouseClient } from "@langfuse/shared/src/server";
 import { QueryBuilder } from "@/src/features/query/server/queryBuilder";
 import { type QueryType } from "@/src/features/query/types";
+import { executeQuery } from "@/src/features/query/server/queryExecutor";
 import {
   createTrace,
   createObservation,
@@ -200,25 +200,45 @@ describe("queryBuilder", () => {
           orderBy: null,
         } as QueryType,
       ],
+      [
+        "scores-numeric query with filters and time dimension",
+        {
+          view: "scores-numeric",
+          dimensions: [],
+          metrics: [
+            {
+              measure: "value",
+              aggregation: "sum",
+            },
+          ],
+          filters: [
+            {
+              column: "name",
+              operator: "=",
+              value: "Money-saved-eval-test",
+              type: "string",
+            },
+            {
+              column: "value",
+              operator: ">",
+              value: 0,
+              type: "number",
+            },
+          ],
+          timeDimension: {
+            granularity: "auto",
+          },
+          fromTimestamp: "2025-07-02T12:39:49.089Z",
+          toTimestamp: "2025-07-09T12:39:49.089Z",
+          orderBy: null,
+        } as QueryType,
+      ],
     ])(
       "should compile query to valid SQL: (%s)",
       async (_name, query: QueryType) => {
         const projectId = randomUUID();
 
-        // When
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-
-        // Then
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result = await executeQuery(projectId, query);
         expect(result).toBeDefined();
       },
     );
@@ -340,17 +360,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(1);
@@ -387,17 +398,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(2);
@@ -450,17 +452,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return traces with name "qa-bot"
         expect(result.data).toHaveLength(1);
@@ -496,17 +489,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(2);
@@ -564,17 +548,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         expect(result.data).toHaveLength(4);
         // Expect one entry for all so index order does not matter
@@ -629,17 +604,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return traces with tag-a or tag-b
         expect(result.data).toHaveLength(2);
@@ -709,17 +675,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return traces with both tag-a and tag-b
         expect(result.data).toHaveLength(1);
@@ -780,17 +737,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return traces without tag-a or tag-b
         expect(result.data).toHaveLength(2);
@@ -857,17 +805,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(2);
@@ -924,17 +863,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(4); // 2 names × 2 environments = 4 combinations
@@ -997,17 +927,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(1);
@@ -1050,20 +971,14 @@ describe("queryBuilder", () => {
 
         // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause is present in the query
         expect(compiledQuery).toContain("ORDER BY name asc");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - results should be ordered by name alphabetically
         expect(result.data).toHaveLength(3);
@@ -1101,20 +1016,14 @@ describe("queryBuilder", () => {
 
         // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause is present in the query
         expect(compiledQuery).toContain("ORDER BY sum_observationsCount desc");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - results should be ordered by observation count descending
         expect(result.data).toHaveLength(3);
@@ -1154,25 +1063,17 @@ describe("queryBuilder", () => {
           ],
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause is present in the query with both fields
         expect(compiledQuery).toContain(
           "ORDER BY environment asc, sum_observationsCount desc",
         );
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
-
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
         // Assert - results should be ordered by environment (asc) and then by observation count (desc)
         expect(result.data).toHaveLength(4);
 
@@ -1230,22 +1131,15 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause includes default time dimension ordering
         expect(compiledQuery).toContain("ORDER BY time_dimension asc");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Results should be ordered by time dimension (ascending)
         expect(result.data.length).toBeGreaterThan(0);
@@ -1290,22 +1184,15 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause includes default metric ordering (descending)
         expect(compiledQuery).toContain("ORDER BY sum_observationsCount desc");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Results should be ordered by observation count descending (default for metrics)
         expect(result.data).toHaveLength(3);
@@ -1341,22 +1228,15 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify ORDER BY clause includes default dimension ordering (ascending)
         expect(compiledQuery).toContain("ORDER BY name asc");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Results should be ordered by name ascending (default for dimensions)
         expect(result.data).toHaveLength(3);
@@ -1400,17 +1280,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(2);
@@ -1447,17 +1318,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(1);
@@ -1527,23 +1389,16 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify WITH FILL clause is present in the query
         expect(compiledQuery).toContain("WITH FILL");
         expect(compiledQuery).toContain("STEP INTERVAL 1 DAY");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Expected to have 3 days in the result (including the filled gap)
         expect(result.data.length).toBeGreaterThanOrEqual(3);
@@ -1680,17 +1535,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should have 5 combinations (chat-today, chat-yesterday, embeddings-today, embeddings-yesterday, embeddings-dayBefore)
         expect(result.data).toHaveLength(5);
@@ -1798,22 +1644,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-
-        const result = await (
-          await clickhouseClient({
-            clickhouse_settings: {
-              date_time_output_format: "iso",
-            },
-          }).query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Verify we have results
         expect(result.data.length).toBeGreaterThan(0);
@@ -1893,17 +1725,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         expect(result.data).toHaveLength(2);
         expect(result.data[0].name).toBe("trace-with-metadata-1");
@@ -2041,7 +1864,6 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
         const { query: compiledQuery, parameters } = queryBuilder.build(
           query,
@@ -2054,12 +1876,9 @@ describe("queryBuilder", () => {
         expect(compiledQuery).toContain(": String}) = 0");
         expect(Object.values(parameters)).toContain("CATEGORICAL");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(3); // accuracy, relevance, coherence
@@ -2166,17 +1985,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return human scores
         expect(result.data).toHaveLength(1);
@@ -2274,23 +2084,16 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify joins included
         expect(compiledQuery).toContain("LEFT JOIN traces");
         expect(compiledQuery).toContain("LEFT JOIN observations");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should have 2 rows (1 for each trace/model combination)
         expect(result.data).toHaveLength(2);
@@ -2408,17 +2211,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return true scores
         expect(result.data).toHaveLength(2);
@@ -2503,17 +2297,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         expect(result.data).toHaveLength(2);
         expect(result.data[0].name).toBe("score-premium");
@@ -2574,22 +2359,15 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
+        const { query: compiledQuery } = queryBuilder.build(query, projectId);
 
         // Verify the compiled query contains filtering on name
         expect(compiledQuery).toContain("scores_numeric.name");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return scores with name "accuracy"
         expect(result.data).toHaveLength(1);
@@ -2711,7 +2489,6 @@ describe("queryBuilder", () => {
           orderBy: null,
         };
 
-        // Execute query
         const queryBuilder = new QueryBuilder();
         const { query: compiledQuery, parameters } = queryBuilder.build(
           query,
@@ -2722,12 +2499,9 @@ describe("queryBuilder", () => {
         expect(compiledQuery).toContain("data_type = {");
         expect(Object.values(parameters)).toContain("CATEGORICAL");
 
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should have 4 rows for different name+value combinations
         expect(result.data).toHaveLength(4);
@@ -2832,17 +2606,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert - should only return auto-source scores
         expect(result.data).toHaveLength(2);
@@ -2993,18 +2758,8 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         // Assert
         expect(result.data).toHaveLength(3);
@@ -3044,6 +2799,201 @@ describe("queryBuilder", () => {
         expect(parseInt(claudeResult.p95_timeToFirstToken)).toBeLessThanOrEqual(
           1200,
         );
+      });
+
+      it("should return null streamingLatency and timeToFirstToken when completion_start_time is null", async () => {
+        const projectId = randomUUID();
+
+        // Create trace
+        const trace = createTrace({
+          project_id: projectId,
+          name: "null-completion-start-time-trace",
+          environment: "default",
+          timestamp: new Date().getTime(),
+        });
+        await createTracesCh([trace]);
+
+        // Create observation with NULL completion_start_time
+        const startTime = new Date();
+        const endTime = new Date(startTime.getTime() + 1000);
+        const observation = createObservation({
+          project_id: projectId,
+          trace_id: trace.id,
+          type: "generation",
+          name: "model-x",
+          provided_model_name: "model-x",
+          environment: "default",
+          start_time: startTime.getTime(),
+          completion_start_time: null, // explicitly null
+          end_time: endTime.getTime(),
+        });
+        await createObservationsCh([observation]);
+
+        // Build query selecting metrics per observation
+        const query: QueryType = {
+          view: "observations",
+          dimensions: [{ field: "name" }],
+          metrics: [
+            { measure: "timeToFirstToken", aggregation: "max" },
+            { measure: "streamingLatency", aggregation: "max" },
+          ],
+          filters: [
+            {
+              column: "type",
+              operator: "=",
+              value: "generation",
+              type: "string",
+            },
+          ],
+          timeDimension: null,
+          fromTimestamp: new Date(
+            new Date().setDate(new Date().getDate() - 1),
+          ).toISOString(),
+          toTimestamp: new Date(
+            new Date().setDate(new Date().getDate() + 1),
+          ).toISOString(),
+          orderBy: null,
+        };
+
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
+
+        expect(result.data).toHaveLength(1);
+        const row = result.data[0];
+        expect(row.max_timeToFirstToken).toBeNull();
+        expect(row.max_streamingLatency).toBeNull();
+      });
+
+      it("should return streamingLatency and timeToFirstToken when completion_start_time is present", async () => {
+        const projectId = randomUUID();
+
+        // Create trace
+        const trace = createTrace({
+          project_id: projectId,
+          name: "null-completion-start-time-trace",
+          environment: "default",
+          timestamp: new Date().getTime(),
+        });
+        await createTracesCh([trace]);
+
+        // Create observation with NULL completion_start_time
+        const startTime = new Date();
+        const endTime = new Date(startTime.getTime() + 1000);
+        const observation = createObservation({
+          project_id: projectId,
+          trace_id: trace.id,
+          type: "generation",
+          name: "model-x",
+          provided_model_name: "model-x",
+          environment: "default",
+          start_time: startTime.getTime(),
+          completion_start_time: startTime.getTime() + 200,
+          end_time: endTime.getTime(),
+        });
+        await createObservationsCh([observation]);
+
+        // Build query selecting metrics per observation
+        const query: QueryType = {
+          view: "observations",
+          dimensions: [{ field: "name" }],
+          metrics: [
+            { measure: "timeToFirstToken", aggregation: "max" },
+            { measure: "streamingLatency", aggregation: "max" },
+          ],
+          filters: [
+            {
+              column: "type",
+              operator: "=",
+              value: "generation",
+              type: "string",
+            },
+          ],
+          timeDimension: null,
+          fromTimestamp: new Date(
+            new Date().setDate(new Date().getDate() - 1),
+          ).toISOString(),
+          toTimestamp: new Date(
+            new Date().setDate(new Date().getDate() + 1),
+          ).toISOString(),
+          orderBy: null,
+        };
+
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
+
+        expect(result.data).toHaveLength(1);
+        const row = result.data[0];
+        expect(row.max_timeToFirstToken).toBe("200");
+        expect(row.max_streamingLatency).toBe("800");
+      });
+
+      it("should calculate tokens correctly", async () => {
+        const projectId = randomUUID();
+
+        // Create trace
+        const trace = createTrace({
+          project_id: projectId,
+          name: "null-completion-start-time-trace",
+          environment: "default",
+          timestamp: new Date().getTime(),
+        });
+        await createTracesCh([trace]);
+
+        // Create observation with NULL completion_start_time
+        const startTime = new Date();
+        const endTime = new Date(startTime.getTime() + 1000);
+        const observation = createObservation({
+          project_id: projectId,
+          trace_id: trace.id,
+          type: "generation",
+          name: "model-x",
+          provided_model_name: "model-x",
+          environment: "default",
+          start_time: startTime.getTime(),
+          completion_start_time: startTime.getTime() + 200,
+          end_time: endTime.getTime(),
+          usage_details: {
+            input_tokens: 100,
+            input_cache_tokens: 200,
+            output_tokens: 300,
+            output_cache_tokens: 400,
+            total: 1000,
+          },
+        });
+        await createObservationsCh([observation]);
+
+        // Build query selecting metrics per observation
+        const query: QueryType = {
+          view: "observations",
+          dimensions: [{ field: "name" }],
+          metrics: [
+            { measure: "inputTokens", aggregation: "sum" },
+            { measure: "outputTokens", aggregation: "sum" },
+            { measure: "totalTokens", aggregation: "sum" },
+            { measure: "outputTokensPerSecond", aggregation: "avg" },
+          ],
+          filters: [],
+          timeDimension: null,
+          fromTimestamp: new Date(
+            new Date().setDate(new Date().getDate() - 1),
+          ).toISOString(),
+          toTimestamp: new Date(
+            new Date().setDate(new Date().getDate() + 1),
+          ).toISOString(),
+          orderBy: null,
+        };
+
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
+
+        expect(result.data).toHaveLength(1);
+        const row = result.data[0];
+        expect(row.sum_inputTokens).toBe("300");
+        expect(row.sum_outputTokens).toBe("700");
+        expect(row.sum_totalTokens).toBe("1000");
       });
 
       it("should filter observations by metadata correctly", async () => {
@@ -3111,21 +3061,180 @@ describe("queryBuilder", () => {
         };
 
         // Execute query
-        const queryBuilder = new QueryBuilder();
-        const { query: compiledQuery, parameters } = queryBuilder.build(
-          query,
-          projectId,
-        );
-        const result = await (
-          await clickhouseClient().query({
-            query: compiledQuery,
-            query_params: parameters,
-          })
-        ).json();
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
 
         expect(result.data).toHaveLength(2);
         expect(result.data[0].name).toBe("observation-basic");
         expect(result.data[0].count_count).toBe("1");
+      });
+
+      it("should generate histogram with custom bin count for cost distribution", async () => {
+        // Setup
+        const projectId = randomUUID();
+
+        // Create traces with observations that have different costs
+        const traces = [];
+        const observations = [];
+
+        // Create trace for cost distribution test
+        const trace = createTrace({
+          project_id: projectId,
+          name: "cost-distribution-trace",
+          environment: "default",
+          timestamp: new Date().getTime(),
+        });
+        traces.push(trace);
+
+        // Create observations with varying costs to test histogram with custom bins
+        // Generate 30 observations with costs ranging from $0.001 to $1.00
+        const costValues = [
+          // Low cost cluster ($0.001-$0.01) - 10 observations
+          ...Array.from({ length: 10 }, (_, i) => 0.001 + i * 0.001),
+          // Medium cost cluster ($0.05-$0.20) - 10 observations
+          ...Array.from({ length: 10 }, (_, i) => 0.05 + i * 0.015),
+          // High cost cluster ($0.50-$1.00) - 10 observations
+          ...Array.from({ length: 10 }, (_, i) => 0.5 + i * 0.05),
+        ];
+
+        costValues.forEach((cost, index) => {
+          observations.push(
+            createObservation({
+              project_id: projectId,
+              trace_id: trace.id,
+              type: "generation",
+              name: `cost-observation-${index}`,
+              provided_model_name: "gpt-4",
+              environment: "default",
+              start_time: new Date().getTime(),
+              end_time: new Date().getTime() + 1000,
+              total_cost: cost,
+            }),
+          );
+        });
+
+        await createTracesCh(traces);
+        await createObservationsCh(observations);
+
+        // Test histogram with custom bin count (20 bins)
+        const customBinHistogramQuery: QueryType = {
+          view: "observations",
+          dimensions: [],
+          metrics: [
+            {
+              measure: "totalCost",
+              aggregation: "histogram",
+            },
+          ],
+          filters: [
+            {
+              column: "type",
+              operator: "=",
+              value: "generation",
+              type: "string",
+            },
+          ],
+          timeDimension: null,
+          fromTimestamp: new Date(
+            new Date().setDate(new Date().getDate() - 1),
+          ).toISOString(),
+          toTimestamp: new Date(
+            new Date().setDate(new Date().getDate() + 1),
+          ).toISOString(),
+          orderBy: null,
+          chartConfig: { type: "HISTOGRAM", bins: 20 }, // Custom bin count
+        };
+
+        // Execute histogram query with custom bins
+        const queryBuilder = new QueryBuilder(
+          customBinHistogramQuery.chartConfig,
+        );
+        const { query: compiledQuery } = queryBuilder.build(
+          customBinHistogramQuery,
+          projectId,
+        );
+
+        // Verify the generated SQL contains histogram function with custom bins
+        expect(compiledQuery).toContain("histogram(20)");
+        expect(compiledQuery).toContain("total_cost");
+
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, customBinHistogramQuery);
+
+        // Assert histogram results with custom bins
+        expect(result.data).toHaveLength(1);
+        const histogramData = result.data[0].histogram_totalCost;
+
+        // ClickHouse histogram returns array of tuples [lower, upper, height]
+        expect(Array.isArray(histogramData)).toBe(true);
+        expect(histogramData.length).toBeGreaterThan(0);
+        expect(histogramData.length).toBeLessThanOrEqual(20); // Should not exceed requested bins
+
+        // Verify histogram tuple structure and cost ranges
+        histogramData.forEach((bin: [number, number, number]) => {
+          expect(Array.isArray(bin)).toBe(true);
+          expect(bin).toHaveLength(3);
+          const [lower, upper, height] = bin;
+          expect(typeof lower).toBe("number");
+          expect(typeof upper).toBe("number");
+          expect(typeof height).toBe("number");
+          expect(lower).toBeLessThan(upper);
+          expect(height).toBeGreaterThan(0);
+          // Cost values should be in expected range
+          expect(lower).toBeGreaterThanOrEqual(0);
+          expect(upper).toBeLessThanOrEqual(1.1); // Allow some margin for ClickHouse binning
+        });
+
+        // Verify total count matches our data
+        const totalCount = histogramData.reduce(
+          (sum: number, bin: [number, number, number]) => sum + bin[2],
+          0,
+        );
+        expect(totalCount).toBe(30); // Should match our 30 observations
+      });
+
+      it("should format startTimeMonth dimension correctly", async () => {
+        // Setup
+        const projectId = randomUUID();
+        const trace = createTrace({
+          project_id: projectId,
+          name: "test-trace",
+          environment: "default",
+          timestamp: new Date().getTime(),
+        });
+
+        const observation = createObservation({
+          project_id: projectId,
+          trace_id: trace.id,
+          type: "generation",
+          name: "test-observation",
+          environment: "default",
+          start_time: new Date("2024-03-15T10:00:00Z").getTime(),
+        });
+
+        await createTracesCh([trace]);
+        await createObservationsCh([observation]);
+
+        // Query with startTimeMonth dimension
+        const query: QueryType = {
+          view: "observations",
+          dimensions: [{ field: "startTimeMonth" }],
+          metrics: [{ measure: "count", aggregation: "count" }],
+          filters: [],
+          timeDimension: null,
+          fromTimestamp: "2024-03-01T00:00:00.000Z",
+          toTimestamp: "2024-03-31T23:59:59.999Z",
+          orderBy: null,
+        };
+
+        // Execute query
+        const result: { data: Array<any> } = { data: [] };
+        result.data = await executeQuery(projectId, query);
+
+        // Verify the month is formatted as YYYY-MM
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0].startTimeMonth).toBe("2024-03");
       });
     });
   });

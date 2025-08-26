@@ -17,13 +17,15 @@
 import { type CreateNextContextOptions } from "@trpc/server/adapters/next";
 import { type Session } from "next-auth";
 import { tracing } from "@baselime/trpc-opentelemetry-middleware";
-
 import { getServerAuthSession } from "@/src/server/auth";
 import { prisma, Role } from "@langfuse/shared/src/db";
-import * as z from "zod";
+import * as z from "zod/v4";
+import * as opentelemetry from "@opentelemetry/api";
+import { type IncomingHttpHeaders } from "node:http";
 
 type CreateContextOptions = {
   session: Session | null;
+  headers: IncomingHttpHeaders;
 };
 
 /**
@@ -39,6 +41,7 @@ type CreateContextOptions = {
 export const createInnerTRPCContext = (opts: CreateContextOptions) => {
   return {
     session: opts.session,
+    headers: opts.headers,
     prisma,
     DB,
   };
@@ -56,14 +59,15 @@ export const createTRPCContext = async (opts: CreateNextContextOptions) => {
   // Get the session from the server using the getServerSession wrapper function
   const session = await getServerAuthSession({ req, res });
 
+  // Get the headers from the request
+  const headers = req.headers;
+
   addUserToSpan({
     userId: session?.user?.id,
     email: session?.user?.email ?? undefined,
   });
 
-  return createInnerTRPCContext({
-    session,
-  });
+  return createInnerTRPCContext({ session, headers });
 };
 
 /**
@@ -75,13 +79,14 @@ export const createTRPCContext = async (opts: CreateNextContextOptions) => {
  */
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
-import { ZodError } from "zod";
+import { ZodError } from "zod/v4";
 import { setUpSuperjson } from "@/src/utils/superjson";
 import { DB } from "@/src/server/db";
 import {
-  addUserToSpan,
   getTraceById,
   logger,
+  addUserToSpan,
+  contextWithLangfuseProps,
 } from "@langfuse/shared/src/server";
 
 setUpSuperjson();
@@ -119,10 +124,17 @@ const withErrorHandling = t.middleware(async ({ ctx, next }) => {
   const res = await next({ ctx }); // pass the context to the next middleware
 
   if (!res.ok) {
-    logger.error(
-      `middleware intercepted error with code ${res.error.code}`,
-      res.error,
-    );
+    if (res.error.code === "NOT_FOUND" || res.error.code === "UNAUTHORIZED") {
+      logger.info(
+        `middleware intercepted error with code ${res.error.code}`,
+        res.error,
+      );
+    } else {
+      logger.error(
+        `middleware intercepted error with code ${res.error.code}`,
+        res.error,
+      );
+    }
 
     // Throw a new TRPC error with:
     // - The same error code as the original error
@@ -140,10 +152,25 @@ const withErrorHandling = t.middleware(async ({ ctx, next }) => {
   return res;
 });
 
+// otel setup with proper context propagation
+const withOtelInstrumentation = t.middleware(async (opts) => {
+  // In tRPC v11, input is lazy-loaded and must be accessed via getRawInput()
+  const actualInput = await opts.getRawInput();
+
+  const baggageCtx = contextWithLangfuseProps({
+    headers: opts.ctx.headers,
+    userId: opts.ctx.session?.user?.id,
+    projectId: (actualInput as Record<string, string>)?.projectId,
+  });
+
+  // Execute the next middleware/procedure with our context
+  return opentelemetry.context.with(baggageCtx, () => opts.next());
+});
+
 // otel setup
-const withOtelTracingProcedure = t.procedure.use(
-  tracing({ collectInput: true, collectResult: true }),
-);
+const withOtelTracingProcedure = t.procedure
+  .use(withOtelInstrumentation)
+  .use(tracing({ collectInput: true, collectResult: true }));
 
 /**
  * Public (unauthenticated) procedure
@@ -192,83 +219,83 @@ const inputProjectSchema = z.object({
  * Protected (authenticated) procedure with project role
  */
 
-const enforceUserIsAuthedAndProjectMember = t.middleware(
-  async ({ ctx, rawInput, next }) => {
-    if (!ctx.session || !ctx.session.user) {
-      throw new TRPCError({ code: "UNAUTHORIZED" });
-    }
+const enforceUserIsAuthedAndProjectMember = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  if (!ctx.session || !ctx.session.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
 
-    const result = inputProjectSchema.safeParse(rawInput);
-    if (!result.success)
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Invalid input, projectId is required",
+  const actualInput = await opts.getRawInput();
+  const parsedInput = inputProjectSchema.safeParse(actualInput);
+  if (!parsedInput.success)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Invalid input, projectId is required",
+    });
+
+  // check that the user is a member of this project
+  const projectId = parsedInput.data.projectId;
+  const sessionProject = ctx.session.user.organizations
+    .flatMap((org) =>
+      org.projects.map((project) => ({ ...project, organization: org })),
+    )
+    .find((project) => project.id === projectId);
+
+  if (!sessionProject) {
+    if (ctx.session.user.admin === true) {
+      // fetch org as it is not available in the session for admins
+      const dbProject = await ctx.prisma.project.findFirst({
+        select: {
+          orgId: true,
+        },
+        where: {
+          id: projectId,
+          deletedAt: null,
+        },
       });
-
-    // check that the user is a member of this project
-    const projectId = result.data.projectId;
-    const sessionProject = ctx.session.user.organizations
-      .flatMap((org) =>
-        org.projects.map((project) => ({ ...project, organization: org })),
-      )
-      .find((project) => project.id === projectId);
-
-    if (!sessionProject) {
-      if (ctx.session.user.admin === true) {
-        // fetch org as it is not available in the session for admins
-        const dbProject = await ctx.prisma.project.findFirst({
-          select: {
-            orgId: true,
-          },
-          where: {
-            id: projectId,
-            deletedAt: null,
-          },
-        });
-        if (!dbProject) {
-          logger.error(`Project with ${projectId} id not found`);
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Project not found",
-          });
-        }
-        return next({
-          ctx: {
-            // infers the `session` as non-nullable
-            session: {
-              ...ctx.session,
-              user: ctx.session.user,
-              orgId: dbProject.orgId,
-              orgRole: Role.OWNER,
-              projectId: projectId,
-              projectRole: Role.OWNER,
-            },
-          },
+      if (!dbProject) {
+        logger.error(`Project with ${projectId} id not found`);
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
         });
       }
-      // not a member
-      logger.error(`User is not a member of this project with id ${projectId}`);
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: "User is not a member of this project",
+      return next({
+        ctx: {
+          // infers the `session` as non-nullable
+          session: {
+            ...ctx.session,
+            user: ctx.session.user,
+            orgId: dbProject.orgId,
+            orgRole: Role.OWNER,
+            projectId: projectId,
+            projectRole: Role.OWNER,
+          },
+        },
       });
     }
-
-    return next({
-      ctx: {
-        // infers the `session` as non-nullable
-        session: {
-          ...ctx.session,
-          user: ctx.session.user,
-          orgId: sessionProject.organization.id,
-          orgRole: sessionProject.organization.role,
-          projectId: projectId,
-          projectRole: sessionProject.role,
-        },
-      },
+    // not a member
+    logger.warn(`User is not a member of this project with id ${projectId}`);
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "User is not a member of this project",
     });
-  },
-);
+  }
+
+  return next({
+    ctx: {
+      // infers the `session` as non-nullable
+      session: {
+        ...ctx.session,
+        user: ctx.session.user,
+        orgId: sessionProject.organization.id,
+        orgRole: sessionProject.organization.role,
+        projectId: projectId,
+        projectRole: sessionProject.role,
+      },
+    },
+  });
+});
 
 export const protectedProjectProcedure = withOtelTracingProcedure
   .use(withErrorHandling)
@@ -282,12 +309,14 @@ const inputOrganizationSchema = z.object({
   orgId: z.string(),
 });
 
-const enforceIsAuthedAndOrgMember = t.middleware(({ ctx, rawInput, next }) => {
+const enforceIsAuthedAndOrgMember = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
   if (!ctx.session || !ctx.session.user) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }
 
-  const result = inputOrganizationSchema.safeParse(rawInput);
+  const actualInput = await opts.getRawInput();
+  const result = inputOrganizationSchema.safeParse(actualInput);
   if (!result.success) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -336,10 +365,13 @@ const inputTraceSchema = z.object({
   projectId: z.string(),
   timestamp: z.date().nullish(),
   fromTimestamp: z.date().nullish(),
+  truncated: z.boolean().default(false),
 });
 
-const enforceTraceAccess = t.middleware(async ({ ctx, rawInput, next }) => {
-  const result = inputTraceSchema.safeParse(rawInput);
+const enforceTraceAccess = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  const actualInput = await opts.getRawInput();
+  const result = inputTraceSchema.safeParse(actualInput);
 
   if (!result.success) {
     logger.error("Invalid input when parsing request body", result.error);
@@ -359,6 +391,10 @@ const enforceTraceAccess = t.middleware(async ({ ctx, rawInput, next }) => {
     projectId,
     timestamp: timestamp ?? undefined,
     fromTimestamp: fromTimestamp ?? undefined,
+    renderingProps: {
+      truncated: result.data.truncated,
+      shouldJsonParse: false, // we do not want to parse the input/output for tRPC
+    },
   });
 
   if (!trace) {
@@ -429,8 +465,10 @@ const inputSessionSchema = z.object({
   projectId: z.string(),
 });
 
-const enforceSessionAccess = t.middleware(async ({ ctx, rawInput, next }) => {
-  const result = inputSessionSchema.safeParse(rawInput);
+const enforceSessionAccess = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  const actualInput = await opts.getRawInput();
+  const result = inputSessionSchema.safeParse(actualInput);
   if (!result.success)
     throw new TRPCError({
       code: "BAD_REQUEST",

@@ -5,7 +5,7 @@
 # External connections from other machines will not be able to reach these services directly.
 services:
   langfuse-worker:
-    image: langfuse/langfuse-worker:3
+    image: docker.io/langfuse/langfuse-worker:3
     restart: always
     depends_on: &langfuse-depends-on
       postgres:
@@ -29,6 +29,7 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD} # DONE CHANGEME
       CLICKHOUSE_CLUSTER_ENABLED: ${CLICKHOUSE_CLUSTER_ENABLED:-false}
+      LANGFUSE_USE_AZURE_BLOB: ${LANGFUSE_USE_AZURE_BLOB:-false}
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
       LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
       LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID:-minio}
@@ -63,9 +64,11 @@ services:
       REDIS_TLS_CA: ${REDIS_TLS_CA:-/certs/ca.crt}
       REDIS_TLS_CERT: ${REDIS_TLS_CERT:-/certs/redis.crt}
       REDIS_TLS_KEY: ${REDIS_TLS_KEY:-/certs/redis.key}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
 
   langfuse-web:
-    image: langfuse/langfuse:3
+    image: docker.io/langfuse/langfuse:3
     restart: always
     depends_on: *langfuse-depends-on
     ports:
@@ -87,7 +90,7 @@ services:
       SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
 
   clickhouse:
-    image: clickhouse/clickhouse-server
+    image: docker.io/clickhouse/clickhouse-server
     restart: always
     user: "101:101"
     environment:
@@ -108,7 +111,7 @@ services:
       start_period: 1s
 
   minio:
-    image: minio/minio
+    image: docker.io/minio/minio
     restart: always
     entrypoint: sh
     # create the 'langfuse' bucket before starting the service
@@ -129,7 +132,7 @@ services:
       start_period: 1s
 
   redis:
-    image: redis:7
+    image: docker.io/redis:7
     restart: always
     # DONECHANGEME: row below to secure redis password
     command: >
@@ -143,7 +146,7 @@ services:
       retries: 10
 
   postgres:
-    image: postgres:${POSTGRES_VERSION:-latest}
+    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

@@ -1,4 +1,4 @@
-import { Job, Processor } from "bullmq";
+import { Processor } from "bullmq";
 import {
   logger,
   StorageService,
@@ -19,14 +19,14 @@ const getS3StorageServiceClient = (bucketName: string): StorageService => {
       region: env.LANGFUSE_S3_CORE_DATA_UPLOAD_REGION,
       forcePathStyle:
         env.LANGFUSE_S3_CORE_DATA_UPLOAD_FORCE_PATH_STYLE === "true",
+      awsSse: env.LANGFUSE_S3_CORE_DATA_UPLOAD_SSE,
+      awsSseKmsKeyId: env.LANGFUSE_S3_CORE_DATA_UPLOAD_SSE_KMS_KEY_ID,
     });
   }
   return s3StorageServiceClient;
 };
 
-export const coreDataS3ExportProcessor: Processor = async (
-  job: Job,
-): Promise<void> => {
+export const coreDataS3ExportProcessor: Processor = async (): Promise<void> => {
   if (!env.LANGFUSE_S3_CORE_DATA_UPLOAD_BUCKET) {
     logger.error("No bucket name provided for core data S3 export");
     throw new Error(

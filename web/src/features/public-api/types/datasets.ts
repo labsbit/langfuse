@@ -6,10 +6,11 @@ import {
   queryStringZod,
   type DatasetRuns as DbDatasetRuns,
   type DatasetItem as DbDatasetItems,
-  type DatasetRunItems as DbDatasetRunItems,
+  type Dataset as DbDataset,
   removeObjectKeys,
+  type DatasetRunItemDomain,
 } from "@langfuse/shared";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /**
  * Objects
@@ -53,6 +54,8 @@ const APIDatasetRunItem = z
   })
   .strict();
 
+export type APIDatasetRunItem = z.infer<typeof APIDatasetRunItem>;
+
 const APIDatasetItem = z
   .object({
     datasetName: z.string(),
@@ -83,10 +86,25 @@ export const transformDbDatasetItemToAPIDatasetItem = (
 ): z.infer<typeof APIDatasetItem> =>
   removeObjectKeys(dbDatasetItem, ["projectId"]);
 
-export const transformDbDatasetRunItemToAPIDatasetRunItem = (
-  dbDatasetRunItem: DbDatasetRunItems & { datasetRunName: string },
+export const transformDbDatasetRunItemToAPIDatasetRunItemCh = (
+  dbDatasetRunItem: DatasetRunItemDomain,
 ): z.infer<typeof APIDatasetRunItem> =>
-  removeObjectKeys(dbDatasetRunItem, ["projectId"]);
+  removeObjectKeys(dbDatasetRunItem, [
+    "projectId",
+    "datasetRunDescription",
+    "datasetRunMetadata",
+    "datasetRunCreatedAt",
+    "datasetItemInput",
+    "datasetItemExpectedOutput",
+    "datasetItemMetadata",
+    "datasetId",
+    "error",
+  ]);
+
+export const transformDbDatasetToAPIDataset = (
+  dataset: DbDataset,
+): z.infer<typeof APIDataset> =>
+  removeObjectKeys(dataset, ["remoteExperimentUrl", "remoteExperimentPayload"]);
 
 /**
  * Endpoints

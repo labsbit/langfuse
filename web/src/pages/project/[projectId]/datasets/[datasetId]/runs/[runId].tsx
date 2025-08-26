@@ -82,6 +82,7 @@ export default function Dataset() {
                   <DeleteDatasetRunButton
                     projectId={projectId}
                     datasetRunId={runId}
+                    datasetId={datasetId}
                     redirectUrl={`/project/${projectId}/datasets/${datasetId}`}
                   />
                 </DropdownMenuItem>
@@ -104,7 +105,7 @@ export default function Dataset() {
             <SidePanelTitle>Run details</SidePanelTitle>
           </SidePanelHeader>
           <SidePanelContent>
-            {run.isLoading ? (
+            {run.isPending ? (
               <Skeleton className="h-full w-full" />
             ) : (
               <>

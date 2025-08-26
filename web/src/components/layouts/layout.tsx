@@ -1,4 +1,4 @@
-import { ROUTES, type Route } from "@/src/components/layouts/routes";
+import { type Route } from "@/src/components/layouts/routes";
 import { type PropsWithChildren, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getSession, signOut, useSession } from "next-auth/react";
@@ -16,6 +16,10 @@ import { hasOrganizationAccess } from "@/src/features/rbac/utils/checkOrganizati
 import { SidebarInset, SidebarProvider } from "@/src/components/ui/sidebar";
 import { AppSidebar } from "@/src/components/nav/app-sidebar";
 import { CommandMenu } from "@/src/features/command-k-menu/CommandMenu";
+import {
+  processNavigation,
+  type NavigationItem,
+} from "@/src/components/layouts/utilities/routes";
 
 const signOutUser = async () => {
   sessionStorage.clear();
@@ -115,11 +119,32 @@ export default function Layout(props: PropsWithChildren) {
   // project info based on projectId in the URL
   const { project, organization } = useQueryProjectOrOrganization();
 
+  // Helper function for precise path matching
+  const isPathActive = (routePath: string, currentPath: string): boolean => {
+    // Exact match
+    if (currentPath === routePath) return true;
+
+    // Only allow prefix matching if the route ends with a specific page (not just project root)
+    // This prevents /project/123 from matching /project/123/datasets
+    const isRoot = routePath.split("/").length <= 3;
+    if (isRoot) return false;
+
+    return currentPath.startsWith(routePath + "/");
+  };
+
   const mapNavigation = (route: Route): NavigationItem | null => {
     // Project-level routes
     if (!routerProjectId && route.pathname.includes("[projectId]")) return null;
     // Organization-level routes
     if (!routerOrganizationId && route.pathname.includes("[organizationId]"))
+      return null;
+
+    // UI customization – hide routes that belong to a disabled product module
+    if (
+      route.productModule &&
+      uiCustomization !== null &&
+      !uiCustomization.visibleModules.includes(route.productModule)
+    )
       return null;
 
     // Feature Flags
@@ -176,22 +201,15 @@ export default function Layout(props: PropsWithChildren) {
     const items: (NavigationItem | null)[] =
       route.items?.map((item) => mapNavigation(item)).filter(Boolean) ?? [];
 
-    const url = (
-      route.customizableHref
-        ? (uiCustomization?.[route.customizableHref] ?? route.pathname)
-        : route.pathname
-    )
+    const url = route.pathname
+
       ?.replace("[projectId]", routerProjectId ?? "")
       .replace("[organizationId]", routerOrganizationId ?? "");
 
     return {
       ...route,
       url: url,
-      newTab:
-        route.customizableHref && uiCustomization?.[route.customizableHref]
-          ? true
-          : route.newTab,
-      isActive: router.pathname === route.pathname,
+      isActive: isPathActive(route.pathname, router.pathname),
       items:
         items.length > 0
           ? (items as NavigationItem[]) // does not include null due to filter
@@ -199,13 +217,11 @@ export default function Layout(props: PropsWithChildren) {
     };
   };
 
-  const navigation = ROUTES.map((route) => mapNavigation(route)).filter(
-    (item): item is NavigationItem => Boolean(item),
-  );
-  const topNavigation = navigation.filter(({ bottom }) => !bottom);
-  const bottomNavigation = navigation.filter(({ bottom }) => bottom);
+  // Process navigation using the dedicated utility
+  const { mainNavigation, secondaryNavigation, navigation } =
+    processNavigation(mapNavigation);
 
-  const activePathName = navigation.find(({ isActive }) => isActive)?.title;
+  const activePathName = navigation.find((item) => item.isActive)?.title;
 
   if (session.status === "loading") return <Spinner message="Loading" />;
 
@@ -288,20 +304,20 @@ export default function Layout(props: PropsWithChildren) {
           rel="icon"
           type="image/png"
           sizes="32x32"
-          href={`${env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon-32x32.png`}
+          href={`${env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon-32x32${env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION === "DEV" ? "-dev" : ""}.png`}
         />
         <link
           rel="icon"
           type="image/png"
           sizes="16x16"
-          href={`${env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon-16x16.png`}
+          href={`${env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon-16x16${env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION === "DEV" ? "-dev" : ""}.png`}
         />
       </Head>
       <div>
         <SidebarProvider>
           <AppSidebar
-            navItems={topNavigation}
-            secondaryNavItems={bottomNavigation}
+            navItems={mainNavigation}
+            secondaryNavItems={secondaryNavigation}
             userNavProps={{
               items: getUserNavigation(),
               user: {
@@ -321,12 +337,3 @@ export default function Layout(props: PropsWithChildren) {
     </>
   );
 }
-
-export type NavigationItem = NestedNavigationItem & {
-  items?: NestedNavigationItem[];
-};
-
-type NestedNavigationItem = Omit<Route, "children" | "items"> & {
-  url: string;
-  isActive: boolean;
-};

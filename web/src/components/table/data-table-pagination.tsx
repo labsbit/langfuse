@@ -1,9 +1,9 @@
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  DoubleArrowLeftIcon,
-  DoubleArrowRightIcon,
-} from "@radix-ui/react-icons";
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 import { type Table } from "@tanstack/react-table";
 
 import { Button } from "@/src/components/ui/button";
@@ -46,6 +46,29 @@ export function DataTablePagination<TData>({
       setPageIndex(0);
     }
   }, [currentPage, pageCount, setPageIndex]);
+
+  const handlePageNavigation = (newValue: string) => {
+    if (newValue === "") {
+      table.setPageIndex(0);
+      setInputState(1);
+      return;
+    }
+
+    // if nan, reset to current page
+    if (isNaN(Number(newValue))) {
+      setInputState(currentPage);
+      return;
+    }
+
+    const newPageIndex = Number(newValue) - 1;
+    if (newPageIndex < 0 || newPageIndex >= pageCount) {
+      setInputState(currentPage);
+      return;
+    }
+
+    table.setPageIndex(newPageIndex);
+    setInputState(newPageIndex + 1);
+  };
 
   return (
     <div className="flex items-center justify-between">
@@ -94,28 +117,14 @@ export function DataTablePagination<TData>({
                 onChange={(e) => {
                   setInputState(e.target.value);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handlePageNavigation(e.currentTarget.value);
+                  }
+                }}
                 onBlur={(e) => {
-                  const newValue = e.target.value;
-                  if (newValue === "") {
-                    table.setPageIndex(0);
-                    setInputState(1);
-                    return;
-                  }
-
-                  // if nan, reset to current page
-                  if (isNaN(Number(newValue))) {
-                    setInputState(currentPage);
-                    return;
-                  }
-
-                  const newPageIndex = Number(newValue) - 1;
-                  if (newPageIndex < 0 || newPageIndex >= pageCount) {
-                    setInputState(currentPage);
-                    return;
-                  }
-
-                  table.setPageIndex(newPageIndex);
-                  setInputState(newPageIndex + 1);
+                  handlePageNavigation(e.target.value);
                 }}
                 className="h-8 appearance-none"
                 style={{
@@ -153,7 +162,7 @@ export function DataTablePagination<TData>({
             disabled={!table.getCanPreviousPage()}
           >
             <span className="sr-only">Go to first page</span>
-            <DoubleArrowLeftIcon className="h-4 w-4" />
+            <ChevronsLeft className="h-4 w-4" />
           </Button>
           <Button
             variant="outline"
@@ -167,7 +176,7 @@ export function DataTablePagination<TData>({
             disabled={!table.getCanPreviousPage()}
           >
             <span className="sr-only">Go to previous page</span>
-            <ChevronLeftIcon className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button
             variant="outline"
@@ -181,7 +190,7 @@ export function DataTablePagination<TData>({
             disabled={!table.getCanNextPage() || pageCount === -1}
           >
             <span className="sr-only">Go to next page</span>
-            <ChevronRightIcon className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4" />
           </Button>
           <Button
             variant="outline"
@@ -195,7 +204,7 @@ export function DataTablePagination<TData>({
             disabled={!table.getCanNextPage() || pageCount === -1}
           >
             <span className="sr-only">Go to last page</span>
-            <DoubleArrowRightIcon className="h-4 w-4" />
+            <ChevronsRight className="h-4 w-4" />
           </Button>
         </div>
       </div>

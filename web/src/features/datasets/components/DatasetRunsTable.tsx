@@ -12,7 +12,7 @@ import { DataTableToolbar } from "@/src/components/table/data-table-toolbar";
 import useColumnVisibility from "@/src/features/column-visibility/hooks/useColumnVisibility";
 import { type Prisma } from "@langfuse/shared";
 import { useRowHeightLocalStorage } from "@/src/components/table/data-table-row-height-switch";
-import { IOTableCell } from "@/src/components/ui/CodeJsonViewer";
+import { IOTableCell } from "@/src/components/ui/IOTableCell";
 import {
   getScoreDataTypeIcon,
   getScoreGroupColumnProps,
@@ -49,6 +49,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
@@ -137,7 +138,7 @@ const DatasetRunTableMultiSelectAction = ({
         key="delete-dialog"
         open={isDeleteDialogOpen}
         onOpenChange={(isOpen) => {
-          if (!mutDelete.isLoading) {
+          if (!mutDelete.isPending) {
             setIsDeleteDialogOpen(isOpen);
           }
         }}
@@ -151,22 +152,25 @@ const DatasetRunTableMultiSelectAction = ({
               {selectedRunIds.length > 1 ? "s" : ""}.
             </DialogDescription>
           </DialogHeader>
-          <Button
-            variant="destructive"
-            loading={mutDelete.isLoading}
-            disabled={mutDelete.isLoading}
-            onClick={async (event) => {
-              event.preventDefault();
-              capture("dataset_run:delete_form_submit");
-              await mutDelete.mutateAsync({
-                projectId,
-                datasetRunIds: selectedRunIds,
-              });
-              setIsDeleteDialogOpen(false);
-            }}
-          >
-            Delete Dataset Runs
-          </Button>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              loading={mutDelete.isPending}
+              disabled={mutDelete.isPending}
+              onClick={async (event) => {
+                event.preventDefault();
+                capture("dataset_run:delete_form_submit");
+                await mutDelete.mutateAsync({
+                  projectId,
+                  datasetId,
+                  datasetRunIds: selectedRunIds,
+                });
+                setIsDeleteDialogOpen(false);
+              }}
+            >
+              Delete Dataset Runs
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -377,6 +381,13 @@ export function DatasetRunsTable(props: {
       id: "countRunItems",
       size: 90,
       enableHiding: true,
+      cell: ({ row }) => {
+        const countRunItems: DatasetRunRowData["countRunItems"] =
+          row.getValue("countRunItems");
+        if (countRunItems === undefined || runsMetrics.isPending)
+          return <Skeleton className="h-3 w-1/2" />;
+        return <>{countRunItems}</>;
+      },
     },
     {
       accessorKey: "avgLatency",
@@ -387,7 +398,8 @@ export function DatasetRunsTable(props: {
       cell: ({ row }) => {
         const avgLatency: DatasetRunRowData["avgLatency"] =
           row.getValue("avgLatency");
-        if (avgLatency === undefined) return <Skeleton className="h-3 w-1/2" />;
+        if (avgLatency === undefined || runsMetrics.isPending)
+          return <Skeleton className="h-3 w-1/2" />;
         return <>{formatIntervalSeconds(avgLatency)}</>;
       },
     },
@@ -400,7 +412,8 @@ export function DatasetRunsTable(props: {
       cell: ({ row }) => {
         const avgTotalCost: DatasetRunRowData["avgTotalCost"] =
           row.getValue("avgTotalCost");
-        if (!avgTotalCost) return <Skeleton className="h-3 w-1/2" />;
+        if (!avgTotalCost || runsMetrics.isPending)
+          return <Skeleton className="h-3 w-1/2" />;
         return <>{avgTotalCost}</>;
       },
     },
@@ -466,6 +479,7 @@ export function DatasetRunsTable(props: {
               <DeleteDatasetRunButton
                 projectId={props.projectId}
                 datasetRunId={id}
+                datasetId={props.datasetId}
               />
             </DropdownMenuContent>
           </DropdownMenu>
@@ -481,11 +495,11 @@ export function DatasetRunsTable(props: {
       id: item.id,
       name: item.name,
       createdAt: item.createdAt,
-      countRunItems: item.countRunItems.toString(),
-      avgLatency: item.avgLatency,
+      countRunItems: item.countRunItems?.toString() ?? "0",
+      avgLatency: item.avgLatency ?? 0,
       avgTotalCost: item.avgTotalCost
         ? usdFormatter(item.avgTotalCost.toNumber())
-        : undefined,
+        : usdFormatter(0),
       runItemScores: item.scores
         ? verifyAndPrefixScoreDataAgainstKeys(
             scoreKeysAndProps,
@@ -615,9 +629,10 @@ export function DatasetRunsTable(props: {
               ]}
             />
             <DataTable
+              tableName={"datasetRuns"}
               columns={columns}
               data={
-                runs.isLoading
+                runs.isPending
                   ? { isLoading: true, isError: false }
                   : runs.isError
                     ? {
@@ -675,9 +690,10 @@ export function DatasetRunsTable(props: {
             ]}
           />
           <DataTable
+            tableName={"datasetRuns"}
             columns={columns}
             data={
-              runs.isLoading
+              runs.isPending
                 ? { isLoading: true, isError: false }
                 : runs.isError
                   ? {

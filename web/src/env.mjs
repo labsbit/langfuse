@@ -51,7 +51,7 @@ export const env = createEnv({
     LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: z.enum(["true", "false"]).optional(),
     SALT: z.string({
       required_error:
-        "A strong Salt is required to encrypt API keys securely. See: https://langfuse.com/docs/deployment/self-host#deploy-the-container",
+        "A strong Salt is required to encrypt API keys securely. See: https://langfuse.com/self-hosting#deploy-the-container",
     }),
     // Add newly signed up users to default org and/or project with role
     LANGFUSE_DEFAULT_ORG_ID: z.string().optional(),
@@ -158,21 +158,6 @@ export const env = createEnv({
     EMAIL_FROM_ADDRESS: z.string().optional(),
     SMTP_CONNECTION_URL: z.string().optional(),
 
-    // S3 Batch Export
-    LANGFUSE_S3_BATCH_EXPORT_ENABLED: z
-      .enum(["true", "false"])
-      .default("false"),
-    LANGFUSE_S3_BATCH_EXPORT_BUCKET: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_PREFIX: z.string().default(""),
-    LANGFUSE_S3_BATCH_EXPORT_REGION: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: z.string().optional(),
-    LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: z
-      .enum(["true", "false"])
-      .default("false"),
-
     TURNSTILE_SECRET_KEY: z.string().optional(),
 
     // Otel
@@ -213,23 +198,9 @@ export const env = createEnv({
       )
       .optional(),
 
-    REDIS_HOST: z.string().nullish(),
-    REDIS_PORT: z.coerce
-      .number({
-        description:
-          ".env files convert numbers to strings, therefore we have to enforce them to be numbers",
-      })
-      .positive()
-      .max(65536, `options.port should be >= 0 and < 65536`)
-      .default(6379)
-      .nullable(),
-    REDIS_AUTH: z.string().nullish(),
-    REDIS_CONNECTION_STRING: z.string().nullish(),
-    REDIS_ENABLE_AUTO_PIPELINING: z.enum(["true", "false"]).default("true"),
-
     // langfuse caching
-    LANGFUSE_CACHE_API_KEY_ENABLED: z.enum(["true", "false"]).default("false"),
-    LANGFUSE_CACHE_API_KEY_TTL_SECONDS: z.coerce.number().default(120),
+    LANGFUSE_CACHE_API_KEY_ENABLED: z.enum(["true", "false"]).default("true"),
+    LANGFUSE_CACHE_API_KEY_TTL_SECONDS: z.coerce.number().default(300),
 
     // Multimodal media upload to S3
     LANGFUSE_S3_MEDIA_MAX_CONTENT_LENGTH: z.coerce
@@ -250,6 +221,8 @@ export const env = createEnv({
       .number()
       .nonnegative()
       .default(3600),
+    LANGFUSE_S3_MEDIA_UPLOAD_SSE: z.enum(["AES256", "aws:kms"]).optional(),
+    LANGFUSE_S3_MEDIA_UPLOAD_SSE_KMS_KEY_ID: z.string().optional(),
 
     LANGFUSE_ALLOWED_ORGANIZATION_CREATORS: z
       .string()
@@ -276,7 +249,7 @@ export const env = createEnv({
     LANGFUSE_INIT_ORG_CLOUD_PLAN: z.string().optional(), // for use in CI
     LANGFUSE_INIT_PROJECT_ID: z.string().optional(),
     LANGFUSE_INIT_PROJECT_NAME: z.string().optional(),
-    LANGFUSE_INIT_PROJECT_RETENTION: z.number().int().gte(7).optional(),
+    LANGFUSE_INIT_PROJECT_RETENTION: z.coerce.number().int().gte(3).optional(),
     LANGFUSE_INIT_PROJECT_PUBLIC_KEY: z.string().optional(),
     LANGFUSE_INIT_PROJECT_SECRET_KEY: z.string().optional(),
     LANGFUSE_INIT_USER_EMAIL: z
@@ -284,11 +257,22 @@ export const env = createEnv({
       .optional(),
     LANGFUSE_INIT_USER_NAME: z.string().optional(),
     LANGFUSE_INIT_USER_PASSWORD: z.string().optional(),
-    LANGFUSE_MAX_HISTORIC_EVAL_CREATION_LIMIT: z
+    LANGFUSE_MAX_HISTORIC_EVAL_CREATION_LIMIT: z.coerce
       .number()
       .positive()
       .default(50_000),
     PLAIN_AUTHENTICATION_SECRET: z.string().optional(),
+    PLAIN_API_KEY: z.string().optional(),
+    PLAIN_CARDS_API_TOKEN: z.string().optional(),
+
+    // UI customization - comma-separated list of visible product modules
+    LANGFUSE_UI_VISIBLE_PRODUCT_MODULES: z.string().optional(),
+    // UI customization - comma-separated list of hidden product modules
+    LANGFUSE_UI_HIDDEN_PRODUCT_MODULES: z.string().optional(),
+
+    SLACK_CLIENT_ID: z.string().optional(),
+    SLACK_CLIENT_SECRET: z.string().optional(),
+    SLACK_STATE_SECRET: z.string().optional(),
   },
 
   /**
@@ -314,6 +298,10 @@ export const env = createEnv({
     NEXT_PUBLIC_PLAIN_APP_ID: z.string().optional(),
     NEXT_PUBLIC_BUILD_ID: z.string().optional(),
     NEXT_PUBLIC_BASE_PATH: z.string().optional(),
+    NEXT_PUBLIC_LANGFUSE_PLAYGROUND_STREAMING_ENABLED_DEFAULT: z
+      .enum(["true", "false"])
+      .optional()
+      .default("true"),
   },
 
   /**
@@ -453,26 +441,6 @@ export const env = createEnv({
     OTEL_SERVICE_NAME: process.env.OTEL_SERVICE_NAME,
     OTEL_TRACE_SAMPLING_RATIO: process.env.OTEL_TRACE_SAMPLING_RATIO,
 
-    // S3 Batch Export
-    LANGFUSE_S3_BATCH_EXPORT_ENABLED:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_ENABLED,
-    LANGFUSE_S3_BATCH_EXPORT_BUCKET:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_BUCKET,
-    LANGFUSE_S3_BATCH_EXPORT_PREFIX:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_PREFIX,
-    LANGFUSE_S3_BATCH_EXPORT_REGION:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_REGION,
-    LANGFUSE_S3_BATCH_EXPORT_ENDPOINT:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_ENDPOINT,
-    LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT,
-    LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID,
-    LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY,
-    LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:
-      process.env.LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE,
-
     // S3 media upload
     LANGFUSE_S3_MEDIA_MAX_CONTENT_LENGTH:
       process.env.LANGFUSE_S3_MEDIA_MAX_CONTENT_LENGTH,
@@ -492,6 +460,9 @@ export const env = createEnv({
       process.env.LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE,
     LANGFUSE_S3_MEDIA_DOWNLOAD_URL_EXPIRY_SECONDS:
       process.env.LANGFUSE_S3_MEDIA_DOWNLOAD_URL_EXPIRY_SECONDS,
+    LANGFUSE_S3_MEDIA_UPLOAD_SSE: process.env.LANGFUSE_S3_MEDIA_UPLOAD_SSE,
+    LANGFUSE_S3_MEDIA_UPLOAD_SSE_KMS_KEY_ID:
+      process.env.LANGFUSE_S3_MEDIA_UPLOAD_SSE_KMS_KEY_ID,
     // Worker
     TURNSTILE_SECRET_KEY: process.env.TURNSTILE_SECRET_KEY,
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
@@ -500,6 +471,8 @@ export const env = createEnv({
     // Other
     NEXT_PUBLIC_PLAIN_APP_ID: process.env.NEXT_PUBLIC_PLAIN_APP_ID,
     PLAIN_AUTHENTICATION_SECRET: process.env.PLAIN_AUTHENTICATION_SECRET,
+    PLAIN_API_KEY: process.env.PLAIN_API_KEY,
+    PLAIN_CARDS_API_TOKEN: process.env.PLAIN_CARDS_API_TOKEN,
     // clickhouse
     CLICKHOUSE_URL: process.env.CLICKHOUSE_URL,
     CLICKHOUSE_CLUSTER_NAME: process.env.CLICKHOUSE_CLUSTER_NAME,
@@ -524,15 +497,17 @@ export const env = createEnv({
       process.env.LANGFUSE_UI_DEFAULT_BASE_URL_ANTHROPIC,
     LANGFUSE_UI_DEFAULT_BASE_URL_AZURE:
       process.env.LANGFUSE_UI_DEFAULT_BASE_URL_AZURE,
+    LANGFUSE_UI_VISIBLE_PRODUCT_MODULES:
+      process.env.LANGFUSE_UI_VISIBLE_PRODUCT_MODULES,
+    LANGFUSE_UI_HIDDEN_PRODUCT_MODULES:
+      process.env.LANGFUSE_UI_HIDDEN_PRODUCT_MODULES,
+    // Playground
+    NEXT_PUBLIC_LANGFUSE_PLAYGROUND_STREAMING_ENABLED_DEFAULT:
+      process.env.NEXT_PUBLIC_LANGFUSE_PLAYGROUND_STREAMING_ENABLED_DEFAULT,
     // EE License
     LANGFUSE_EE_LICENSE_KEY: process.env.LANGFUSE_EE_LICENSE_KEY,
     ADMIN_API_KEY: process.env.ADMIN_API_KEY,
     ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
-    REDIS_HOST: process.env.REDIS_HOST,
-    REDIS_PORT: process.env.REDIS_PORT,
-    REDIS_AUTH: process.env.REDIS_AUTH,
-    REDIS_CONNECTION_STRING: process.env.REDIS_CONNECTION_STRING,
-    REDIS_ENABLE_AUTO_PIPELINING: process.env.REDIS_ENABLE_AUTO_PIPELINING,
     // langfuse caching
     LANGFUSE_CACHE_API_KEY_ENABLED: process.env.LANGFUSE_CACHE_API_KEY_ENABLED,
     LANGFUSE_CACHE_API_KEY_TTL_SECONDS:
@@ -565,6 +540,9 @@ export const env = createEnv({
     NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
     LANGFUSE_MAX_HISTORIC_EVAL_CREATION_LIMIT:
       process.env.LANGFUSE_MAX_HISTORIC_EVAL_CREATION_LIMIT,
+    SLACK_CLIENT_ID: process.env.SLACK_CLIENT_ID,
+    SLACK_CLIENT_SECRET: process.env.SLACK_CLIENT_SECRET,
+    SLACK_STATE_SECRET: process.env.SLACK_STATE_SECRET,
   },
   // Skip validation in Docker builds
   // DOCKER_BUILD is set in Dockerfile

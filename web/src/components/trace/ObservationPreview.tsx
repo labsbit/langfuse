@@ -1,22 +1,25 @@
-import { JSONView } from "@/src/components/ui/CodeJsonViewer";
-import { AnnotationQueueObjectType, type APIScoreV2 } from "@langfuse/shared";
+import { PrettyJsonView } from "@/src/components/ui/PrettyJsonView";
+import {
+  AnnotationQueueObjectType,
+  type APIScoreV2,
+  isGenerationLike,
+} from "@langfuse/shared";
 import { Badge } from "@/src/components/ui/badge";
 import { type ObservationReturnType } from "@/src/server/api/routers/traces";
 import { api } from "@/src/utils/api";
 import { IOPreview } from "@/src/components/trace/IOPreview";
 import { formatIntervalSeconds } from "@/src/utils/dates";
 import Link from "next/link";
-import { usdFormatter } from "@/src/utils/numbers";
+import { usdFormatter, formatTokenCounts } from "@/src/utils/numbers";
 import { withDefault, StringParam, useQueryParam } from "use-query-params";
 import ScoresTable from "@/src/components/table/use-cases/scores";
-import { JumpToPlaygroundButton } from "@/src/ee/features/playground/page/components/JumpToPlaygroundButton";
+import { JumpToPlaygroundButton } from "@/src/features/playground/page/components/JumpToPlaygroundButton";
 import { AnnotateDrawer } from "@/src/features/scores/components/AnnotateDrawer";
 import useLocalStorage from "@/src/components/useLocalStorage";
 import { CommentDrawerButton } from "@/src/features/comments/CommentDrawerButton";
 import { cn } from "@/src/utils/tailwind";
 import { NewDatasetItemFromExistingObject } from "@/src/features/datasets/components/NewDatasetItemFromExistingObject";
-import { CreateNewAnnotationQueueItem } from "@/src/ee/features/annotation-queues/components/CreateNewAnnotationQueueItem";
-import { useHasEntitlement } from "@/src/features/entitlements/hooks";
+import { CreateNewAnnotationQueueItem } from "@/src/features/annotation-queues/components/CreateNewAnnotationQueueItem";
 import { calculateDisplayTotalCost } from "@/src/components/trace/lib/helpers";
 import { Fragment, useMemo, useState } from "react";
 import { useIsAuthenticatedAndProjectMember } from "@/src/features/auth/hooks";
@@ -35,6 +38,7 @@ import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePos
 import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { useRouter } from "next/router";
 import { CopyIdsPopover } from "@/src/components/trace/CopyIdsPopover";
+import { useJsonExpansion } from "@/src/components/trace/JsonExpansionContext";
 
 export const ObservationPreview = ({
   observations,
@@ -59,18 +63,22 @@ export const ObservationPreview = ({
     "view",
     withDefault(StringParam, "preview"),
   );
-  const [currentView, setCurrentView] = useState<"pretty" | "json">("pretty");
+  const [currentView, setCurrentView] = useLocalStorage<"pretty" | "json">(
+    "jsonViewPreference",
+    "pretty",
+  );
   const capture = usePostHogClientCapture();
   const [isPrettyViewAvailable, setIsPrettyViewAvailable] = useState(false);
   const [emptySelectedConfigIds, setEmptySelectedConfigIds] = useLocalStorage<
     string[]
   >("emptySelectedConfigIds", []);
-  const hasEntitlement = useHasEntitlement("annotation-queues");
+
   const isAuthenticatedAndProjectMember =
     useIsAuthenticatedAndProjectMember(projectId);
   const router = useRouter();
   const { peek } = router.query;
   const showScoresTab = isAuthenticatedAndProjectMember && peek === undefined;
+  const { expansionState, setFieldExpansion } = useJsonExpansion();
 
   const currentObservation = observations.find(
     (o) => o.id === currentObservationId,
@@ -163,25 +171,25 @@ export const ObservationPreview = ({
                     scores={scores}
                     emptySelectedConfigIds={emptySelectedConfigIds}
                     setEmptySelectedConfigIds={setEmptySelectedConfigIds}
-                    hasGroupedButton={hasEntitlement}
+                    hasGroupedButton={true}
                     environment={preloadedObservation.environment}
                   />
-                  {hasEntitlement && (
-                    <CreateNewAnnotationQueueItem
-                      projectId={projectId}
-                      objectId={preloadedObservation.id}
-                      objectType={AnnotationQueueObjectType.OBSERVATION}
+
+                  <CreateNewAnnotationQueueItem
+                    projectId={projectId}
+                    objectId={preloadedObservation.id}
+                    objectType={AnnotationQueueObjectType.OBSERVATION}
+                  />
+                </div>
+                {observationWithInputAndOutput.data &&
+                  isGenerationLike(observationWithInputAndOutput.data.type) && (
+                    <JumpToPlaygroundButton
+                      source="generation"
+                      generation={observationWithInputAndOutput.data}
+                      analyticsEventName="trace_detail:test_in_playground_button_click"
+                      className={cn(isTimeline ? "!hidden" : "")}
                     />
                   )}
-                </div>
-                {observationWithInputAndOutput.data?.type === "GENERATION" && (
-                  <JumpToPlaygroundButton
-                    source="generation"
-                    generation={observationWithInputAndOutput.data}
-                    analyticsEventName="trace_detail:test_in_playground_button_click"
-                    className={cn(isTimeline ? "!hidden" : "")}
-                  />
-                )}
                 <CommentDrawerButton
                   projectId={preloadedObservation.projectId}
                   objectId={preloadedObservation.id}
@@ -256,7 +264,7 @@ export const ObservationPreview = ({
                       projectId={preloadedObservation.projectId}
                     />
                   ) : undefined}
-                  {preloadedObservation.type === "GENERATION" && (
+                  {isGenerationLike(preloadedObservation.type) && (
                     <BreakdownTooltip
                       details={preloadedObservation.usageDetails}
                       isCost={false}
@@ -266,9 +274,12 @@ export const ObservationPreview = ({
                         className="flex items-center gap-1"
                       >
                         <span>
-                          {preloadedObservation.inputUsage} prompt →{" "}
-                          {preloadedObservation.outputUsage} completion (∑{" "}
-                          {preloadedObservation.totalUsage})
+                          {formatTokenCounts(
+                            preloadedObservation.inputUsage,
+                            preloadedObservation.outputUsage,
+                            preloadedObservation.totalUsage,
+                            true,
+                          )}
                         </span>
                         <InfoIcon className="h-3 w-3" />
                       </Badge>
@@ -327,16 +338,29 @@ export const ObservationPreview = ({
                     {preloadedObservation.modelParameters &&
                     typeof preloadedObservation.modelParameters === "object"
                       ? Object.entries(preloadedObservation.modelParameters)
-                          .filter(Boolean)
-                          .map(([key, value]) => (
-                            <Badge variant="tertiary" key={key}>
-                              {key}:{" "}
-                              {Object.prototype.toString.call(value) ===
+                          .filter(([_, value]) => value !== null)
+                          .map(([key, value]) => {
+                            const valueString =
+                              Object.prototype.toString.call(value) ===
                               "[object Object]"
                                 ? JSON.stringify(value)
-                                : value?.toString()}
-                            </Badge>
-                          ))
+                                : value?.toString();
+                            return (
+                              <Badge
+                                variant="tertiary"
+                                key={key}
+                                className="h-6 max-w-md"
+                              >
+                                {/* CHILD: This span handles the text truncation */}
+                                <span
+                                  className="overflow-hidden text-ellipsis whitespace-nowrap"
+                                  title={valueString}
+                                >
+                                  {key}: {valueString}
+                                </span>
+                              </Badge>
+                            );
+                          })
                       : null}
                   </Fragment>
                 </Fragment>
@@ -393,26 +417,40 @@ export const ObservationPreview = ({
                   media={observationMedia.data}
                   currentView={currentView}
                   setIsPrettyViewAvailable={setIsPrettyViewAvailable}
+                  inputExpansionState={expansionState.input}
+                  outputExpansionState={expansionState.output}
+                  onInputExpansionChange={(expansion) =>
+                    setFieldExpansion("input", expansion)
+                  }
+                  onOutputExpansionChange={(expansion) =>
+                    setFieldExpansion("output", expansion)
+                  }
                 />
               </div>
               <div>
                 {preloadedObservation.statusMessage && (
-                  <JSONView
+                  <PrettyJsonView
                     key={preloadedObservation.id + "-status"}
                     title="Status Message"
                     json={preloadedObservation.statusMessage}
+                    currentView={currentView}
                   />
                 )}
               </div>
               <div>
                 {observationWithInputAndOutput.data?.metadata && (
-                  <JSONView
+                  <PrettyJsonView
                     key={observationWithInputAndOutput.data.id + "-metadata"}
                     title="Metadata"
                     json={observationWithInputAndOutput.data.metadata}
                     media={observationMedia.data?.filter(
                       (m) => m.field === "metadata",
                     )}
+                    currentView={currentView}
+                    externalExpansionState={expansionState.metadata}
+                    onExternalExpansionChange={(expansion) =>
+                      setFieldExpansion("metadata", expansion)
+                    }
                   />
                 )}
               </div>

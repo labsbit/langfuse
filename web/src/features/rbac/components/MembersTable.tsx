@@ -16,6 +16,7 @@ import useColumnVisibility from "@/src/features/column-visibility/hooks/useColum
 import { CreateProjectMemberButton } from "@/src/features/rbac/components/CreateProjectMemberButton";
 import { useHasOrganizationAccess } from "@/src/features/rbac/utils/checkOrganizationAccess";
 import { api } from "@/src/utils/api";
+import { safeExtract } from "@/src/utils/map-utils";
 import type { RouterOutput } from "@/src/utils/types";
 import { Role } from "@langfuse/shared";
 import { type Row } from "@tanstack/react-table";
@@ -170,7 +171,7 @@ export function MembersTable({
       headerTooltip: {
         description:
           "The org-role is the default role for this user in this organization and applies to the organization and all its projects.",
-        href: "https://langfuse.com/docs/rbac",
+        href: "https://langfuse.com/docs/administration/rbac",
       },
       cell: ({ row }) => {
         const orgRole = row.getValue("orgRole") as MembersTableRow["orgRole"];
@@ -232,7 +233,7 @@ export function MembersTable({
             headerTooltip: {
               description:
                 "The role for this user in this specific project. This role overrides the default project role.",
-              href: "https://langfuse.com/docs/rbac",
+              href: "https://langfuse.com/docs/administration/rbac",
             },
             cell: ({
               row,
@@ -309,10 +310,13 @@ export function MembersTable({
   ];
 
   const [columnVisibility, setColumnVisibility] =
-    useColumnVisibility<MembersTableRow>("membersColumnVisibility", columns);
+    useColumnVisibility<MembersTableRow>(
+      project ? "membersColumnVisibilityProject" : "membersColumnVisibilityOrg",
+      columns,
+    );
 
   const [columnOrder, setColumnOrder] = useColumnOrder<MembersTableRow>(
-    "membersColumnOrder",
+    project ? "membersColumnOrderProject" : "membersColumnOrderOrg",
     columns,
   );
 
@@ -362,9 +366,10 @@ export function MembersTable({
       {showSettingsCard ? (
         <SettingsTableCard>
           <DataTable
+            tableName={project ? "projectMembers" : "orgMembers"}
             columns={columns}
             data={
-              members.isLoading
+              members.isPending
                 ? { isLoading: true, isError: false }
                 : members.isError
                   ? {
@@ -375,8 +380,8 @@ export function MembersTable({
                   : {
                       isLoading: false,
                       isError: false,
-                      data: members.data.memberships.map((t) =>
-                        convertToTableRow(t),
+                      data: safeExtract(members.data, "memberships", []).map(
+                        (t) => convertToTableRow(t),
                       ),
                     }
             }
@@ -393,9 +398,10 @@ export function MembersTable({
         </SettingsTableCard>
       ) : (
         <DataTable
+          tableName={project ? "projectMembers" : "orgMembers"}
           columns={columns}
           data={
-            members.isLoading
+            members.isPending
               ? { isLoading: true, isError: false }
               : members.isError
                 ? {
@@ -406,8 +412,8 @@ export function MembersTable({
                 : {
                     isLoading: false,
                     isError: false,
-                    data: members.data.memberships.map((t) =>
-                      convertToTableRow(t),
+                    data: safeExtract(members.data, "memberships", []).map(
+                      (t) => convertToTableRow(t),
                     ),
                   }
           }
@@ -455,7 +461,7 @@ const OrgRoleDropdown = ({
 
   return (
     <Select
-      disabled={!hasCudAccess || mut.isLoading}
+      disabled={!hasCudAccess || mut.isPending}
       value={currentRole}
       onValueChange={(value) => {
         if (
@@ -515,7 +521,7 @@ const ProjectRoleDropdown = ({
 
   return (
     <Select
-      disabled={!hasCudAccess || mut.isLoading}
+      disabled={!hasCudAccess || mut.isPending}
       value={currentProjectRole ?? Role.NONE}
       onValueChange={(value) => {
         if (

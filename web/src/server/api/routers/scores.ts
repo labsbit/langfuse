@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 import { throwIfNoProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { auditLog } from "@/src/features/audit-logs/auditLog";
@@ -44,7 +44,7 @@ import {
   QueueJobs,
   getScoreMetadataById,
   deleteScores,
-  traceWithSessionIdExists,
+  getTracesIdentifierForSession,
 } from "@langfuse/shared/src/server";
 import { v4 } from "uuid";
 import { throwIfNoEntitlement } from "@/src/features/entitlements/server/hasEntitlement";
@@ -306,11 +306,11 @@ export const scoresRouter = createTRPCRouter({
         }
       } else if (inflatedParams.sessionId) {
         // We consider no longer writing all sessions into postgres, hence we should search for traces with the session id
-        const isSessionReferenced = await traceWithSessionIdExists(
+        const traceIdentifiers = await getTracesIdentifierForSession(
           input.projectId,
           inflatedParams.sessionId,
         );
-        if (!isSessionReferenced) {
+        if (traceIdentifiers.length === 0) {
           logger.error(
             `No trace referencing session with id ${inflatedParams.sessionId} in project ${input.projectId} in Clickhouse`,
           );
@@ -327,6 +327,7 @@ export const scoresRouter = createTRPCRouter({
         inflatedParams.sessionId,
         input.name,
         input.configId,
+        input.dataType,
       );
 
       const score = !!clickhouseScore
@@ -432,6 +433,7 @@ export const scoresRouter = createTRPCRouter({
           trace_id: score.traceId,
           observation_id: score.observationId,
           session_id: score.sessionId,
+          environment: score.environment,
         });
 
         updatedScore = {

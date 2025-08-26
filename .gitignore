@@ -4,6 +4,7 @@
 /node_modules
 /.pnp
 .pnp.js
+migrate
 
 # testing
 /coverage
@@ -39,7 +40,9 @@ yarn-error.log*
 .env*
 !.env.dev.example
 !.env.dev-azure.example
+!.env.dev-redis-cluster.example
 !.env.prod.example
+!.env.test.example
 
 # vercel
 .vercel
@@ -47,15 +50,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
-/generated/typescript-server
+/generated
 
 # openapi spec that is copied during build
 /public/openapi*.yml
 
 
 # vscode
-.devcontainer
-
 node_modules
 **/node_modules
 **/dist
@@ -65,3 +66,6 @@ node_modules
 .turbo
 
 web/test-results/*
+
+# local config files
+*.local.*

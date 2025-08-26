@@ -1,4 +1,4 @@
-import z from "zod";
+import z from "zod/v4";
 
 export const clickhouseStringDateSchema = z
   .string()
@@ -38,7 +38,7 @@ export const observationRecordBaseSchema = z.object({
   parent_observation_id: z.string().nullish(),
   environment: z.string().default("default"),
   name: z.string().nullish(),
-  metadata: z.record(z.string()),
+  metadata: z.record(z.string(), z.string()),
   level: z.string().nullish(),
   status_message: z.string().nullish(),
   version: z.string().nullish(),
@@ -92,7 +92,7 @@ export const traceRecordBaseSchema = z.object({
   id: z.string(),
   name: z.string().nullish(),
   user_id: z.string().nullish(),
-  metadata: z.record(z.string()),
+  metadata: z.record(z.string(), z.string()),
   release: z.string().nullish(),
   version: z.string().nullish(),
   project_id: z.string(),
@@ -122,6 +122,45 @@ export const traceRecordInsertSchema = traceRecordBaseSchema.extend({
 });
 export type TraceRecordInsertType = z.infer<typeof traceRecordInsertSchema>;
 
+export const traceNullRecordInsertSchema = z.object({
+  // Identifiers
+  project_id: z.string(),
+  id: z.string(),
+  start_time: z.number(),
+  end_time: z.number().nullish(),
+  name: z.string().nullish(),
+
+  // Metadata properties
+  metadata: z.record(z.string(), z.string()),
+  user_id: z.string().nullish(),
+  session_id: z.string().nullish(),
+  environment: z.string(),
+  tags: z.array(z.string()),
+  version: z.string().nullish(),
+  release: z.string().nullish(),
+
+  // UI properties - nullable to prevent absent values being interpreted as overwrites
+  bookmarked: z.boolean().nullish(),
+  public: z.boolean().nullish(),
+
+  // Aggregations
+  observation_ids: z.array(z.string()),
+  score_ids: z.array(z.string()),
+  cost_details: z.record(z.string(), z.number()),
+  usage_details: z.record(z.string(), z.number()),
+
+  // Input/Output
+  input: z.string(),
+  output: z.string(),
+
+  created_at: z.number(),
+  updated_at: z.number(),
+  event_ts: z.number(),
+});
+export type TraceNullRecordInsertType = z.infer<
+  typeof traceNullRecordInsertSchema
+>;
+
 export const scoreRecordBaseSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -134,7 +173,7 @@ export const scoreRecordBaseSchema = z.object({
   value: z.number().nullish(),
   source: z.string(),
   comment: z.string().nullish(),
-  metadata: z.record(z.string()),
+  metadata: z.record(z.string(), z.string()),
   author_user_id: z.string().nullish(),
   config_id: z.string().nullish(),
   data_type: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).nullish(),
@@ -158,6 +197,45 @@ export const scoreRecordInsertSchema = scoreRecordBaseSchema.extend({
   event_ts: z.number(),
 });
 export type ScoreRecordInsertType = z.infer<typeof scoreRecordInsertSchema>;
+
+const datasetRunItemRecordBaseSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  trace_id: z.string(),
+  observation_id: z.string().nullish(),
+  dataset_id: z.string(),
+  dataset_run_id: z.string(),
+  dataset_item_id: z.string(),
+  dataset_run_name: z.string(),
+  dataset_run_description: z.string().nullish(),
+  dataset_run_metadata: z.record(z.string(), z.string()),
+  dataset_item_input: z.string(),
+  dataset_item_expected_output: z.string(),
+  dataset_item_metadata: z.record(z.string(), z.string()),
+  is_deleted: z.number(),
+  error: z.string().nullish(),
+});
+
+const datasetRunItemRecordReadSchema = datasetRunItemRecordBaseSchema.extend({
+  dataset_run_created_at: clickhouseStringDateSchema,
+  created_at: clickhouseStringDateSchema,
+  updated_at: clickhouseStringDateSchema,
+  event_ts: clickhouseStringDateSchema,
+});
+export type DatasetRunItemRecordReadType = z.infer<
+  typeof datasetRunItemRecordReadSchema
+>;
+
+export const datasetRunItemRecordInsertSchema =
+  datasetRunItemRecordBaseSchema.extend({
+    created_at: z.number(),
+    updated_at: z.number(),
+    event_ts: z.number(),
+    dataset_run_created_at: z.number(),
+  });
+export type DatasetRunItemRecordInsertType = z.infer<
+  typeof datasetRunItemRecordInsertSchema
+>;
 
 export const blobStorageFileLogRecordBaseSchema = z.object({
   id: z.string(),
@@ -271,6 +349,50 @@ export const convertPostgresTraceToInsert = (
   };
 };
 
+export const convertPostgresDatasetRunItemToInsert = (
+  datasetRunItem: Record<string, any>,
+): DatasetRunItemRecordInsertType => {
+  return {
+    id: datasetRunItem.id,
+    project_id: datasetRunItem.project_id,
+    dataset_run_id: datasetRunItem.dataset_run_id,
+    dataset_item_id: datasetRunItem.dataset_item_id,
+    dataset_id: datasetRunItem.dataset_id,
+    trace_id: datasetRunItem.trace_id,
+    observation_id: datasetRunItem.observation_id,
+    error: datasetRunItem.error,
+    created_at: datasetRunItem.created_at?.getTime(),
+    updated_at: datasetRunItem.updated_at?.getTime(),
+    // denormalized run data
+    dataset_run_name: datasetRunItem.dataset_run_name,
+    dataset_run_description: datasetRunItem.dataset_run_description,
+    dataset_run_metadata:
+      typeof datasetRunItem.dataset_run_metadata === "string" ||
+      typeof datasetRunItem.dataset_run_metadata === "number" ||
+      typeof datasetRunItem.dataset_run_metadata === "boolean"
+        ? { metadata: datasetRunItem.dataset_run_metadata }
+        : Array.isArray(datasetRunItem.dataset_run_metadata)
+          ? { metadata: datasetRunItem.dataset_run_metadata }
+          : (datasetRunItem.dataset_run_metadata ?? {}),
+    dataset_run_created_at: datasetRunItem.dataset_run_created_at?.getTime(),
+    // denormalized item data
+    dataset_item_input: JSON.stringify(datasetRunItem.dataset_item_input),
+    dataset_item_expected_output: JSON.stringify(
+      datasetRunItem.dataset_item_expected_output,
+    ),
+    dataset_item_metadata:
+      typeof datasetRunItem.dataset_item_metadata === "string" ||
+      typeof datasetRunItem.dataset_item_metadata === "number" ||
+      typeof datasetRunItem.dataset_item_metadata === "boolean"
+        ? { metadata: datasetRunItem.dataset_item_metadata }
+        : Array.isArray(datasetRunItem.dataset_item_metadata)
+          ? { metadata: datasetRunItem.dataset_item_metadata }
+          : (datasetRunItem.dataset_item_metadata ?? {}),
+    event_ts: datasetRunItem.created_at?.getTime(),
+    is_deleted: 0,
+  };
+};
+
 /**
  * Expects a single record from a
  * `select o.*,
@@ -372,5 +494,130 @@ export const convertPostgresScoreToInsert = (
     updated_at: score.updated_at?.getTime(),
     event_ts: score.timestamp?.getTime(),
     is_deleted: 0,
+  };
+};
+
+export const convertTraceToTraceNull = (
+  traceRecord: TraceRecordInsertType,
+): TraceNullRecordInsertType => {
+  return {
+    // Identifiers
+    project_id: traceRecord.project_id,
+    id: traceRecord.id,
+    start_time: traceRecord.timestamp,
+    end_time: null, // traces don't have end_time, will be null
+    name: traceRecord.name || null,
+
+    // Metadata properties
+    metadata: traceRecord.metadata,
+    user_id: traceRecord.user_id || null,
+    session_id: traceRecord.session_id || null,
+    environment: traceRecord.environment,
+    tags: traceRecord.tags,
+    version: traceRecord.version || null,
+    release: traceRecord.release || null,
+
+    // UI properties - nullable to prevent absent values being interpreted as overwrites
+    bookmarked: traceRecord.bookmarked ?? null,
+    public: traceRecord.public ?? null,
+
+    // Aggregations - empty for now, will be populated by aggregation processes
+    observation_ids: [],
+    score_ids: [],
+    cost_details: {},
+    usage_details: {},
+
+    // Input/Output
+    input: traceRecord.input || "",
+    output: traceRecord.output || "",
+
+    created_at: traceRecord.created_at,
+    updated_at: traceRecord.updated_at,
+    event_ts: traceRecord.event_ts,
+  };
+};
+
+export const convertObservationToTraceNull = (
+  observationRecord: ObservationRecordInsertType,
+): TraceNullRecordInsertType => {
+  return {
+    // Identifiers
+    project_id: observationRecord.project_id,
+    // Use trace_id as the id in traces_null. Always set given the conditions around calling the function
+    id: observationRecord.trace_id || "",
+    start_time: observationRecord.start_time,
+    end_time: observationRecord.end_time || null,
+    name: null,
+
+    // Metadata properties
+    metadata: {},
+    user_id: null,
+    session_id: null,
+    environment: observationRecord.environment,
+    tags: [],
+    version: null,
+    release: null,
+
+    // UI properties - nullable to prevent absent values being interpreted as overwrites
+    bookmarked: null,
+    public: null,
+
+    // Aggregations - include this observation ID
+    observation_ids: [observationRecord.id],
+    score_ids: [],
+    // We can fill the cost details here, but we shouldn't trust them.
+    // Only used for verification to estimate how big the double-counting is.
+    // Actually, we don't as this will make backfills challenging.
+    cost_details: {}, // observationRecord.cost_details || {},
+    usage_details: {}, // observationRecord.usage_details || {},
+
+    // Input/Output
+    input: "",
+    output: "",
+
+    created_at: observationRecord.created_at,
+    updated_at: observationRecord.updated_at,
+    event_ts: observationRecord.event_ts,
+  };
+};
+
+export const convertScoreToTraceNull = (
+  scoreRecord: ScoreRecordInsertType,
+): TraceNullRecordInsertType => {
+  return {
+    // Identifiers
+    project_id: scoreRecord.project_id,
+    // Use trace_id as the id in traces_null. Always set given the conditions around calling the function
+    id: scoreRecord.trace_id || "",
+    start_time: scoreRecord.timestamp,
+    end_time: null, // scores don't have end_time
+    name: null,
+
+    // Metadata properties
+    metadata: {},
+    user_id: null,
+    session_id: null,
+    environment: scoreRecord.environment,
+    tags: [], // scores don't have tags
+    version: null, // scores don't have version
+    release: null, // scores don't have release
+
+    // UI properties - nullable to prevent absent values being interpreted as overwrites
+    bookmarked: null,
+    public: null,
+
+    // Aggregations - include this score ID
+    observation_ids: [],
+    score_ids: [scoreRecord.id],
+    cost_details: {},
+    usage_details: {},
+
+    // Input/Output
+    input: "", // scores don't have input
+    output: "", // scores don't have output
+
+    created_at: scoreRecord.created_at,
+    updated_at: scoreRecord.updated_at,
+    event_ts: scoreRecord.event_ts,
   };
 };

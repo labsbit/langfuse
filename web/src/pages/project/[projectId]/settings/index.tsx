@@ -15,10 +15,7 @@ import { PostHogLogo } from "@/src/components/PosthogLogo";
 import { Card } from "@/src/components/ui/card";
 import { ScoreConfigSettings } from "@/src/features/scores/components/ScoreConfigSettings";
 import { TransferProjectButton } from "@/src/features/projects/components/TransferProjectButton";
-import {
-  useEntitlements,
-  useHasEntitlement,
-} from "@/src/features/entitlements/hooks";
+import { useHasEntitlement } from "@/src/features/entitlements/hooks";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { useRouter } from "next/router";
 import { SettingsDangerZone } from "@/src/components/SettingsDangerZone";
@@ -29,6 +26,7 @@ import { ModelsSettings } from "@/src/features/models/components/ModelSettings";
 import ConfigureRetention from "@/src/features/projects/components/ConfigureRetention";
 import ContainerPage from "@/src/components/layouts/container-page";
 import ProtectedLabelsSettings from "@/src/features/prompts/components/ProtectedLabelsSettings";
+import { Slack } from "lucide-react";
 
 type ProjectSettingsPage = {
   title: string;
@@ -46,11 +44,6 @@ export function useProjectSettingsPages(): ProjectSettingsPage[] {
     "prompt-protected-labels",
   );
 
-  const entitlements = useEntitlements();
-  const showLLMConnectionsSettings =
-    entitlements.includes("playground") ||
-    entitlements.includes("model-based-evaluations");
-
   if (!project || !organization || !router.query.projectId) {
     return [];
   }
@@ -60,7 +53,7 @@ export function useProjectSettingsPages(): ProjectSettingsPage[] {
     organization,
     showBillingSettings,
     showRetentionSettings,
-    showLLMConnectionsSettings,
+    showLLMConnectionsSettings: true,
     showProtectedLabelsSettings,
   });
 }
@@ -250,14 +243,14 @@ export default function SettingsPage() {
 }
 
 const Integrations = (props: { projectId: string }) => {
-  const hasPosthogEntitlement = useHasEntitlement("integration-posthog");
-  const hasBlobStorageEntitlement = useHasEntitlement(
-    "integration-blobstorage",
-  );
   const hasAccess = useHasProjectAccess({
     projectId: props.projectId,
     scope: "integrations:CRUD",
   });
+
+  const allowBlobStorageIntegration = useHasEntitlement(
+    "scheduled-blob-exports",
+  );
 
   return (
     <div>
@@ -274,14 +267,13 @@ const Integrations = (props: { projectId: string }) => {
             <ActionButton
               variant="secondary"
               hasAccess={hasAccess}
-              hasEntitlement={hasPosthogEntitlement}
               href={`/project/${props.projectId}/settings/integrations/posthog`}
             >
               Configure
             </ActionButton>
             <Button asChild variant="ghost">
               <Link
-                href="https://langfuse.com/docs/analytics/posthog"
+                href="https://langfuse.com/integrations/analytics/posthog"
                 target="_blank"
               >
                 Integration Docs ↗
@@ -301,7 +293,7 @@ const Integrations = (props: { projectId: string }) => {
             <ActionButton
               variant="secondary"
               hasAccess={hasAccess}
-              hasEntitlement={hasBlobStorageEntitlement}
+              hasEntitlement={allowBlobStorageIntegration}
               href={`/project/${props.projectId}/settings/integrations/blobstorage`}
             >
               Configure
@@ -314,6 +306,26 @@ const Integrations = (props: { projectId: string }) => {
                 Integration Docs ↗
               </Link>
             </Button>
+          </div>
+        </Card>
+
+        <Card className="p-3">
+          <div className="mb-4 flex items-center gap-2">
+            <Slack className="h-5 w-5 text-foreground" />
+            <span className="font-semibold">Slack</span>
+          </div>
+          <p className="mb-4 text-sm text-primary">
+            Connect a Slack workspace and create channel automations to receive
+            Langfuse alerts natively in Slack.
+          </p>
+          <div className="flex items-center gap-2">
+            <ActionButton
+              variant="secondary"
+              hasAccess={hasAccess}
+              href={`/project/${props.projectId}/settings/integrations/slack`}
+            >
+              Configure
+            </ActionButton>
           </div>
         </Card>
       </div>

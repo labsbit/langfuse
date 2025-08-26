@@ -4,6 +4,8 @@
  *
  * We also create a few inference helpers for input and output types.
  */
+
+import { captureException } from "@sentry/nextjs";
 import {
   createTRPCProxyClient,
   httpBatchLink,
@@ -13,17 +15,15 @@ import {
   TRPCClientError,
   type TRPCLink,
 } from "@trpc/client";
-import { observable } from "@trpc/server/observable";
 import { createTRPCNext } from "@trpc/next";
 import { type inferRouterInputs, type inferRouterOutputs } from "@trpc/server";
+import { observable } from "@trpc/server/observable";
 import superjson from "superjson";
-
+import { env } from "@/src/env.mjs";
+import { showVersionUpdateToast } from "@/src/features/notifications/showVersionUpdateToast";
 import { type AppRouter } from "@/src/server/api/root";
 import { setUpSuperjson } from "@/src/utils/superjson";
 import { trpcErrorToast } from "@/src/utils/trpcErrorToast";
-import { showVersionUpdateToast } from "@/src/features/notifications/showVersionUpdateToast";
-import { captureException } from "@sentry/nextjs";
-import { env } from "@/src/env.mjs";
 
 setUpSuperjson();
 
@@ -38,13 +38,25 @@ const getBaseUrl = () => {
   return `${hostname}${env.NEXT_PUBLIC_BASE_PATH ?? ""}`;
 };
 
+// Get current pathname without the base path prefix
+// for client-side navigation with a custom basePath set
+export const getPathnameWithoutBasePath = () => {
+  const pathname = window.location.pathname;
+  const basePath = env.NEXT_PUBLIC_BASE_PATH;
+
+  if (basePath && pathname.startsWith(basePath)) {
+    return pathname.slice(basePath.length) || "/";
+  }
+
+  return pathname;
+};
+
 // global build id used to compare versions to show refresh toast on stale cache hit serving deprecated files
 let buildId: string | null = null;
 
 const CLIENT_STALE_CACHE_CODES = [404, 400];
 
 const handleTrpcError = (error: unknown) => {
-  captureException(error);
   if (error instanceof TRPCClientError) {
     const httpStatus: number =
       typeof error.data?.httpStatus === "number" ? error.data.httpStatus : 500;
@@ -59,6 +71,13 @@ const handleTrpcError = (error: unknown) => {
         return;
       }
     }
+    // Only send server errors (5xx) to Sentry, not client errors (4xx)
+    if (httpStatus >= 500 && httpStatus < 600) {
+      captureException(error);
+    }
+  } else {
+    // For non-TRPC errors, still send to Sentry
+    captureException(error);
   }
 
   trpcErrorToast(error);
@@ -96,13 +115,6 @@ export const api = createTRPCNext<AppRouter>({
   config() {
     return {
       /**
-       * Transformer used for data de-serialization from the server.
-       *
-       * @see https://trpc.io/docs/data-transformers
-       */
-      transformer: superjson,
-
-      /**
        * Links used to determine request flow from client to server.
        *
        * @see https://trpc.io/docs/links
@@ -110,9 +122,10 @@ export const api = createTRPCNext<AppRouter>({
       links: [
         buildIdLink(),
         loggerLink({
-          enabled: (opts) =>
-            process.env.NODE_ENV === "development" ||
-            (opts.direction === "down" && opts.result instanceof Error),
+          // Only enable in development - production logs would be captured by Sentry
+          // in an unreadable format. We handle 5xx errors via captureException() in
+          // handleTrpcError and use DataDog for additional server-side logging.
+          enabled: () => process.env.NODE_ENV === "development",
         }),
         splitLink({
           condition(op) {
@@ -127,10 +140,12 @@ export const api = createTRPCNext<AppRouter>({
           // when condition is true, use normal request
           true: httpLink({
             url: `${getBaseUrl()}/api/trpc`,
+            transformer: superjson,
           }),
           // when condition is false, use batching
           false: httpBatchLink({
             url: `${getBaseUrl()}/api/trpc`,
+            transformer: superjson,
             maxURLLength: 2083, // avoid too large batches
           }),
         }),
@@ -138,7 +153,7 @@ export const api = createTRPCNext<AppRouter>({
       queryClientConfig: {
         defaultOptions: {
           queries: {
-            onError: (error) => handleTrpcError(error),
+            onError: (error: unknown) => handleTrpcError(error),
             // react query defaults to `online`, but we want to disable it as it caused issues for some users
             networkMode: "always",
           },
@@ -157,6 +172,7 @@ export const api = createTRPCNext<AppRouter>({
    * @see https://trpc.io/docs/nextjs#ssr-boolean-default-false
    */
   ssr: false,
+  transformer: superjson, // since tRPC v11 has to be here for some reason
 });
 
 /**
@@ -164,15 +180,16 @@ export const api = createTRPCNext<AppRouter>({
  * To be used whenever you need to call the API without react hooks.
  */
 export const directApi = createTRPCProxyClient<AppRouter>({
-  transformer: superjson,
   links: [
     loggerLink({
-      enabled: (opts) =>
-        process.env.NODE_ENV === "development" ||
-        (opts.direction === "down" && opts.result instanceof Error),
+      // Only enable in development - production logs would be captured by Sentry
+      // in an unreadable format. We handle 5xx errors via captureException() in
+      // handleTrpcError and use DataDog for additional server-side logging.
+      enabled: () => process.env.NODE_ENV === "development",
     }),
     httpBatchLink({
       url: `${getBaseUrl()}/api/trpc`,
+      transformer: superjson,
       maxURLLength: 2083, // avoid too large batches
     }),
   ],

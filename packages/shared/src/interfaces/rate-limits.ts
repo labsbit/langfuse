@@ -1,10 +1,11 @@
-import z from "zod";
+import z from "zod/v4";
 import { ApiAccessScope } from "../server";
 
 export const RateLimitResource = z.enum([
   "ingestion",
   "public-api",
   "public-api-metrics",
+  "public-api-daily-metrics-legacy",
   "prompts",
   "legacy-ingestion",
   "datasets",

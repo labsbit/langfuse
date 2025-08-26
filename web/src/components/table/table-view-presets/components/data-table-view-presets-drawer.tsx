@@ -39,6 +39,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogBody,
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import {
@@ -72,7 +73,7 @@ import {
 } from "@/src/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { showErrorToast } from "@/src/features/notifications/showErrorToast";
 import { useUniqueNameValidation } from "@/src/hooks/useUniqueNameValidation";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
@@ -119,7 +120,7 @@ export function TableViewPresetsDrawer({
   const utils = api.useUtils();
   const capture = usePostHogClientCapture();
 
-  const form = useForm<{ name: string }>({
+  const form = useForm({
     resolver: zodResolver(z.object({ name: z.string().min(1) })),
     defaultValues: {
       name: "",
@@ -469,7 +470,7 @@ export function TableViewPresetsDrawer({
                                       <div className="flex w-full justify-end">
                                         <Button
                                           type="submit"
-                                          loading={updateNameMutation.isLoading}
+                                          loading={updateNameMutation.isPending}
                                           disabled={
                                             !!form.formState.errors.name
                                           }
@@ -492,7 +493,7 @@ export function TableViewPresetsDrawer({
                                   await handleDeleteView(view.id);
                                 }}
                                 isDeleteMutationLoading={
-                                  deleteMutation.isLoading
+                                  deleteMutation.isPending
                                 }
                                 invalidateFunc={() => {
                                   utils.TableViewPresets.invalidate();
@@ -571,34 +572,37 @@ export function TableViewPresetsDrawer({
               onSubmit={form.handleSubmit(onSubmit())}
               className="space-y-4"
             >
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>View name</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <DialogBody>
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>View name</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              <div className="mt-4 text-sm text-muted-foreground">
-                <p>This will save the current:</p>
-                <ul className="mt-2 list-disc pl-5">
-                  <li>
-                    Column arrangement ({currentState.columnOrder.length}{" "}
-                    columns)
-                  </li>
-                  <li>Filters ({currentState.filters.length} active)</li>
-                  <li>
-                    Sort order ({formatOrderBy(currentState.orderBy)} criteria)
-                  </li>
-                  {currentState.searchQuery && <li>Search term</li>}
-                </ul>
-              </div>
+                <div className="mt-4 text-sm text-muted-foreground">
+                  <p>This will save the current:</p>
+                  <ul className="mt-2 list-disc pl-5">
+                    <li>
+                      Column arrangement ({currentState.columnOrder.length}{" "}
+                      columns)
+                    </li>
+                    <li>Filters ({currentState.filters.length} active)</li>
+                    <li>
+                      Sort order ({formatOrderBy(currentState.orderBy)}{" "}
+                      criteria)
+                    </li>
+                    {currentState.searchQuery && <li>Search term</li>}
+                  </ul>
+                </div>
+              </DialogBody>
 
               <DialogFooter>
                 <Button
@@ -610,13 +614,13 @@ export function TableViewPresetsDrawer({
                 <Button
                   type="submit"
                   disabled={
-                    createMutation.isLoading ||
+                    createMutation.isPending ||
                     !!form.formState.errors.name ||
                     !hasWriteAccess
                   }
                 >
                   {!hasWriteAccess && <Lock className="mr-2 h-4 w-4" />}
-                  {createMutation.isLoading ? "Saving..." : "Save View"}
+                  {createMutation.isPending ? "Saving..." : "Save View"}
                 </Button>
               </DialogFooter>
             </form>

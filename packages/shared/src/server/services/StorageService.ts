@@ -4,6 +4,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
+  PutObjectCommandInput,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -27,20 +28,21 @@ type UploadFile = {
 };
 
 export interface StorageService {
-  uploadFile(params: UploadFile): Promise<{ signedUrl: string }>;
+  uploadFile(params: UploadFile): Promise<{ signedUrl: string }>; // eslint-disable-line no-unused-vars
 
-  uploadJson(path: string, body: Record<string, unknown>[]): Promise<void>;
+  uploadJson(path: string, body: Record<string, unknown>[]): Promise<void>; // eslint-disable-line no-unused-vars
 
-  download(path: string): Promise<string>;
+  download(path: string): Promise<string>; // eslint-disable-line no-unused-vars
 
-  listFiles(prefix: string): Promise<{ file: string; createdAt: Date }[]>;
+  listFiles(prefix: string): Promise<{ file: string; createdAt: Date }[]>; // eslint-disable-line no-unused-vars
 
   getSignedUrl(
-    fileName: string,
-    ttlSeconds: number,
-    asAttachment?: boolean,
+    fileName: string, // eslint-disable-line no-unused-vars
+    ttlSeconds: number, // eslint-disable-line no-unused-vars
+    asAttachment?: boolean, // eslint-disable-line no-unused-vars
   ): Promise<string>;
 
+  // eslint-disable-next-line no-unused-vars
   getSignedUploadUrl(params: {
     path: string;
     ttlSeconds: number;
@@ -49,7 +51,7 @@ export interface StorageService {
     contentLength: number;
   }): Promise<string>;
 
-  deleteFiles(paths: string[]): Promise<void>;
+  deleteFiles(paths: string[]): Promise<void>; // eslint-disable-line no-unused-vars
 }
 
 export class StorageServiceFactory {
@@ -65,6 +67,8 @@ export class StorageServiceFactory {
    * @param params.useAzureBlob - Use Azure Blob Storage instead of S3
    * @param params.useGoogleCloudStorage - Use Google Cloud Storage instead of S3
    * @param params.googleCloudCredentials - Google Cloud Storage credentials JSON string or path to credentials file
+   * @param params.awsSse - Server-side encryption method (e.g., "aws:kms")
+   * @param params.awsSseKmsKeyId - SSE KMS Key ID when using KMS encryption
    */
   public static getInstance(params: {
     accessKeyId: string | undefined;
@@ -77,6 +81,8 @@ export class StorageServiceFactory {
     useAzureBlob?: boolean;
     useGoogleCloudStorage?: boolean;
     googleCloudCredentials?: string;
+    awsSse: string | undefined;
+    awsSseKmsKeyId: string | undefined;
   }): StorageService {
     if (params.useAzureBlob || env.LANGFUSE_USE_AZURE_BLOB === "true") {
       return new AzureBlobStorageService(params);
@@ -98,6 +104,7 @@ export class StorageServiceFactory {
   }
 }
 
+let azureContainersExists: Record<string, boolean> = {};
 class AzureBlobStorageService implements StorageService {
   private client: ContainerClient;
   private container: string;
@@ -133,8 +140,18 @@ class AzureBlobStorageService implements StorageService {
   }
 
   private async createContainerIfNotExists(): Promise<void> {
+    // Skip container existence check if environment variable is set
+    if (env.LANGFUSE_AZURE_SKIP_CONTAINER_CHECK === "true") {
+      return;
+    }
+
     try {
+      if (azureContainersExists[this.container]) {
+        return; // Container already exists, no need to create it again
+      }
       await this.client.createIfNotExists();
+      azureContainersExists[this.container] = true; // Mark container as created
+      logger.info(`Azure Blob Storage container ${this.container} created`);
     } catch (err) {
       logger.error(
         `Failed to create Azure Blob Storage container ${this.container}`,
@@ -364,6 +381,8 @@ class S3StorageService implements StorageService {
   private client: S3Client;
   private signedUrlClient: S3Client;
   private bucketName: string;
+  private awsSse: string | undefined;
+  private awsSseKmsKeyId: string | undefined;
 
   constructor(params: {
     accessKeyId: string | undefined;
@@ -373,6 +392,8 @@ class S3StorageService implements StorageService {
     externalEndpoint?: string | undefined;
     region: string | undefined;
     forcePathStyle: boolean;
+    awsSse: string | undefined;
+    awsSseKmsKeyId: string | undefined;
   }) {
     // Use accessKeyId and secretAccessKey if provided or fallback to default credentials
     const { accessKeyId, secretAccessKey } = params;
@@ -415,6 +436,18 @@ class S3StorageService implements StorageService {
       : this.client;
 
     this.bucketName = params.bucketName;
+    this.awsSse = params.awsSse;
+    this.awsSseKmsKeyId = params.awsSseKmsKeyId;
+  }
+
+  private addSSEToParams<T>(params: Record<string, unknown>): T {
+    if (this.awsSse) {
+      params.ServerSideEncryption = this.awsSse;
+      if (this.awsSse === "aws:kms" && this.awsSseKmsKeyId) {
+        params.SSEKMSKeyId = this.awsSseKmsKeyId;
+      }
+    }
+    return params as T;
   }
 
   public async uploadFile({
@@ -426,12 +459,12 @@ class S3StorageService implements StorageService {
     try {
       await new Upload({
         client: this.client,
-        params: {
+        params: this.addSSEToParams<PutObjectCommandInput>({
           Bucket: this.bucketName,
           Key: fileName,
           Body: data,
           ContentType: fileType,
-        },
+        }),
       }).done();
 
       const signedUrl = await this.getSignedUrl(fileName, expiresInSeconds);
@@ -439,17 +472,19 @@ class S3StorageService implements StorageService {
       return { signedUrl };
     } catch (err) {
       logger.error(`Failed to upload file to ${fileName}`, err);
-      throw new Error("Failed to upload to S3 or generate signed URL");
+      throw new Error(`Failed to upload to S3 or generate signed URL: ${err}`);
     }
   }
 
   public async uploadJson(path: string, body: Record<string, unknown>[]) {
-    const putCommand = new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: path,
-      Body: JSON.stringify(body),
-      ContentType: "application/json",
-    });
+    const putCommand = new PutObjectCommand(
+      this.addSSEToParams({
+        Bucket: this.bucketName,
+        Key: path,
+        Body: JSON.stringify(body),
+        ContentType: "application/json",
+      }),
+    );
 
     try {
       await this.client.send(putCommand);
@@ -480,6 +515,7 @@ class S3StorageService implements StorageService {
     const listCommand = new ListObjectsV2Command({
       Bucket: this.bucketName,
       Prefix: prefix,
+      MaxKeys: env.LANGFUSE_S3_LIST_MAX_KEYS,
     });
 
     try {
@@ -573,13 +609,15 @@ class S3StorageService implements StorageService {
 
     return getSignedUrl(
       this.signedUrlClient,
-      new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: path,
-        ContentType: contentType,
-        ChecksumSHA256: sha256Hash,
-        ContentLength: contentLength,
-      }),
+      new PutObjectCommand(
+        this.addSSEToParams({
+          Bucket: this.bucketName,
+          Key: path,
+          ContentType: contentType,
+          ChecksumSHA256: sha256Hash,
+          ContentLength: contentLength,
+        }),
+      ),
       {
         expiresIn: ttlSeconds,
         signableHeaders: new Set(["content-type", "content-length"]),

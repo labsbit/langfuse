@@ -34,7 +34,7 @@ export const VersionLabel = ({ className }: { className?: string }) => {
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       enabled: !env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION, // do not check for updates on Langfuse Cloud
-      onError: (error) => console.error("checkUpdate error", error), // do not render default error message
+      throwOnError: false, // do not render default error message
     },
   );
 
@@ -43,7 +43,7 @@ export const VersionLabel = ({ className }: { className?: string }) => {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     enabled: !env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION, // do not check for updates on Langfuse Cloud
-    onError: (error) => console.error("checkUpdate error", error), // do not render default error message
+    throwOnError: false, // do not render default error message
   });
 
   const plan = usePlan();
@@ -52,6 +52,7 @@ export const VersionLabel = ({ className }: { className?: string }) => {
   const selfHostedPlanLabel = !isLangfuseCloud
     ? plan && isSelfHostedPlan(plan)
       ? // self-host plan
+        // TODO: clean up to use planLabels in packages/shared/src/features/entitlements/plans.ts
         {
           short: plan === "self-hosted:pro" ? "Pro" : "EE",
           long: planLabels[plan],

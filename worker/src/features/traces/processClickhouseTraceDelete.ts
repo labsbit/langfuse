@@ -22,6 +22,8 @@ const getS3MediaStorageClient = (bucketName: string): StorageService => {
       endpoint: env.LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT,
       region: env.LANGFUSE_S3_MEDIA_UPLOAD_REGION,
       forcePathStyle: env.LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE === "true",
+      awsSse: env.LANGFUSE_S3_MEDIA_UPLOAD_SSE,
+      awsSseKmsKeyId: env.LANGFUSE_S3_MEDIA_UPLOAD_SSE_KMS_KEY_ID,
     });
   }
   return s3MediaStorageClient;
@@ -141,13 +143,14 @@ export const processClickhouseTraceDelete = async (
 
   await deleteMediaItemsForTraces(projectId, traceIds);
 
-  await removeIngestionEventsFromS3AndDeleteClickhouseRefsForTraces({
-    projectId,
-    traceIds,
-  });
-
   try {
     await Promise.all([
+      env.LANGFUSE_ENABLE_BLOB_STORAGE_FILE_LOG === "true"
+        ? removeIngestionEventsFromS3AndDeleteClickhouseRefsForTraces({
+            projectId,
+            traceIds,
+          })
+        : Promise.resolve(),
       deleteTraces(projectId, traceIds),
       deleteObservationsByTraceIds(projectId, traceIds),
       deleteScoresByTraceIds(projectId, traceIds),

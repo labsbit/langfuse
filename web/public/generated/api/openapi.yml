@@ -79,6 +79,52 @@ paths:
               schema: {}
       security:
         - BasicAuth: []
+    post:
+      description: Create an annotation queue
+      operationId: annotationQueues_createQueue
+      tags:
+        - AnnotationQueues
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnotationQueue'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnotationQueueRequest'
   /api/public/annotation-queues/{queueId}:
     get:
       description: Get an annotation queue by ID
@@ -409,6 +455,111 @@ paths:
               schema: {}
       security:
         - BasicAuth: []
+  /api/public/annotation-queues/{queueId}/assignments:
+    post:
+      description: Create an assignment for a user to an annotation queue
+      operationId: annotationQueues_createQueueAssignment
+      tags:
+        - AnnotationQueues
+      parameters:
+        - name: queueId
+          in: path
+          description: The unique identifier of the annotation queue
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateAnnotationQueueAssignmentResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnotationQueueAssignmentRequest'
+    delete:
+      description: Delete an assignment for a user to an annotation queue
+      operationId: annotationQueues_deleteQueueAssignment
+      tags:
+        - AnnotationQueues
+      parameters:
+        - name: queueId
+          in: path
+          description: The unique identifier of the annotation queue
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteAnnotationQueueAssignmentResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnotationQueueAssignmentRequest'
   /api/public/comments:
     post:
       description: >-
@@ -875,14 +1026,13 @@ paths:
           schema:
             type: integer
             nullable: true
-        - name: response
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/PaginatedDatasetRunItems'
       responses:
-        '204':
+        '200':
           description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDatasetRunItems'
         '400':
           description: ''
           content:
@@ -1422,6 +1572,109 @@ paths:
                         name: My Score
                         value: 0.9
                         environment: default
+  /api/public/llm-connections:
+    get:
+      description: Get all LLM connections in a project
+      operationId: llmConnections_list
+      tags:
+        - LlmConnections
+      parameters:
+        - name: page
+          in: query
+          description: page number, starts at 1
+          required: false
+          schema:
+            type: integer
+            nullable: true
+        - name: limit
+          in: query
+          description: limit of items per page
+          required: false
+          schema:
+            type: integer
+            nullable: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLlmConnections'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+    put:
+      description: >-
+        Create or update an LLM connection. The connection is upserted on
+        provider.
+      operationId: llmConnections_upsert
+      tags:
+        - LlmConnections
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmConnection'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertLlmConnectionRequest'
   /api/public/media/{mediaId}:
     get:
       description: Get a media record
@@ -1564,199 +1817,6 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/GetMediaUploadUrlRequest'
-  /api/public/organizations/memberships:
-    get:
-      description: >-
-        Get all memberships for the organization associated with the API key
-        (requires organization-scoped API key)
-      operationId: memberships_getOrganizationMemberships
-      tags:
-        - Memberships
-      parameters: []
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MembershipsResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '405':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-      security:
-        - BasicAuth: []
-    put:
-      description: >-
-        Create or update a membership for the organization associated with the
-        API key (requires organization-scoped API key)
-      operationId: memberships_updateOrganizationMembership
-      tags:
-        - Memberships
-      parameters: []
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MembershipResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '405':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-      security:
-        - BasicAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MembershipRequest'
-  /api/public/projects/{projectId}/memberships:
-    get:
-      description: >-
-        Get all memberships for a specific project (requires organization-scoped
-        API key)
-      operationId: memberships_getProjectMemberships
-      tags:
-        - Memberships
-      parameters:
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MembershipsResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '405':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-      security:
-        - BasicAuth: []
-    put:
-      description: >-
-        Create or update a membership for a specific project (requires
-        organization-scoped API key). The user must already be a member of the
-        organization.
-      operationId: memberships_updateProjectMembership
-      tags:
-        - Memberships
-      parameters:
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MembershipResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '405':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-      security:
-        - BasicAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MembershipRequest'
   /api/public/metrics:
     get:
       description: Get metrics from the Langfuse project using a query object
@@ -1782,7 +1842,7 @@ paths:
               "metrics": [              // Required. At least one metric must be provided
                 {
                   "measure": string,    // What to measure, e.g. "count", "latency", "value"
-                  "aggregation": string // How to aggregate, e.g. "count", "sum", "avg", "p95"
+                  "aggregation": string // How to aggregate, e.g. "count", "sum", "avg", "p95", "histogram"
                 }
               ],
               "filters": [              // Optional. Default: []
@@ -1804,7 +1864,11 @@ paths:
                   "field": string,      // Field to order by
                   "direction": string   // "asc" or "desc"
                 }
-              ]
+              ],
+              "config": {               // Optional. Query-specific configuration
+                "bins": number,         // Optional. Number of bins for histogram (1-100), default: 10
+                "row_limit": number     // Optional. Row limit for results (1-1000)
+              }
             }
 
             ```
@@ -1818,115 +1882,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MetricsResponse'
-        '400':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '401':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '404':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-        '405':
-          description: ''
-          content:
-            application/json:
-              schema: {}
-      security:
-        - BasicAuth: []
-  /api/public/metrics/daily:
-    get:
-      description: Get daily metrics of the Langfuse project
-      operationId: metrics_daily
-      tags:
-        - Metrics
-      parameters:
-        - name: page
-          in: query
-          description: page number, starts at 1
-          required: false
-          schema:
-            type: integer
-            nullable: true
-        - name: limit
-          in: query
-          description: limit of items per page
-          required: false
-          schema:
-            type: integer
-            nullable: true
-        - name: traceName
-          in: query
-          description: Optional filter by the name of the trace
-          required: false
-          schema:
-            type: string
-            nullable: true
-        - name: userId
-          in: query
-          description: Optional filter by the userId associated with the trace
-          required: false
-          schema:
-            type: string
-            nullable: true
-        - name: tags
-          in: query
-          description: Optional filter for metrics where traces include all of these tags
-          required: false
-          schema:
-            type: array
-            items:
-              type: string
-              nullable: true
-        - name: environment
-          in: query
-          description: >-
-            Optional filter for metrics where events include any of these
-            environments
-          required: false
-          schema:
-            type: array
-            items:
-              type: string
-              nullable: true
-        - name: fromTimestamp
-          in: query
-          description: >-
-            Optional filter to only include traces and observations on or after
-            a certain datetime (ISO 8601)
-          required: false
-          schema:
-            type: string
-            format: date-time
-            nullable: true
-        - name: toTimestamp
-          in: query
-          description: >-
-            Optional filter to only include traces and observations before a
-            certain datetime (ISO 8601)
-          required: false
-          schema:
-            type: string
-            format: date-time
-            nullable: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DailyMetrics'
         '400':
           description: ''
           content:
@@ -2241,6 +2196,15 @@ paths:
           schema:
             type: string
             nullable: true
+        - name: level
+          in: query
+          description: >-
+            Optional filter for observations with a specific level (e.g.
+            "DEBUG", "DEFAULT", "WARNING", "ERROR").
+          required: false
+          schema:
+            $ref: '#/components/schemas/ObservationLevel'
+            nullable: true
         - name: parentObservationId
           in: query
           required: false
@@ -2261,7 +2225,7 @@ paths:
         - name: fromStartTime
           in: query
           description: >-
-            Retrieve only observations with a start_time or or after this
+            Retrieve only observations with a start_time on or after this
             datetime (ISO 8601).
           required: false
           schema:
@@ -2292,6 +2256,344 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ObservationsViews'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+  /api/public/organizations/memberships:
+    get:
+      description: >-
+        Get all memberships for the organization associated with the API key
+        (requires organization-scoped API key)
+      operationId: organizations_getOrganizationMemberships
+      tags:
+        - Organizations
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipsResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+    put:
+      description: >-
+        Create or update a membership for the organization associated with the
+        API key (requires organization-scoped API key)
+      operationId: organizations_updateOrganizationMembership
+      tags:
+        - Organizations
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+    delete:
+      description: >-
+        Delete a membership from the organization associated with the API key
+        (requires organization-scoped API key)
+      operationId: organizations_deleteOrganizationMembership
+      tags:
+        - Organizations
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipDeletionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteMembershipRequest'
+  /api/public/projects/{projectId}/memberships:
+    get:
+      description: >-
+        Get all memberships for a specific project (requires organization-scoped
+        API key)
+      operationId: organizations_getProjectMemberships
+      tags:
+        - Organizations
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipsResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+    put:
+      description: >-
+        Create or update a membership for a specific project (requires
+        organization-scoped API key). The user must already be a member of the
+        organization.
+      operationId: organizations_updateProjectMembership
+      tags:
+        - Organizations
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MembershipRequest'
+    delete:
+      description: >-
+        Delete a membership from a specific project (requires
+        organization-scoped API key). The user must be a member of the
+        organization.
+      operationId: organizations_deleteProjectMembership
+      tags:
+        - Organizations
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipDeletionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+        '405':
+          description: ''
+          content:
+            application/json:
+              schema: {}
+      security:
+        - BasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteMembershipRequest'
+  /api/public/organizations/projects:
+    get:
+      description: >-
+        Get all projects for the organization associated with the API key
+        (requires organization-scoped API key)
+      operationId: organizations_getOrganizationProjects
+      tags:
+        - Organizations
+      parameters: []
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectsResponse'
         '400':
           description: ''
           content:
@@ -2417,7 +2719,7 @@ paths:
                 retention:
                   type: integer
                   description: >-
-                    Number of days to retain data. Must be 0 or at least 7 days.
+                    Number of days to retain data. Must be 0 or at least 3 days.
                     Requires data-retention entitlement for non-zero values.
                     Optional.
               required:
@@ -2486,7 +2788,7 @@ paths:
                 retention:
                   type: integer
                   description: >-
-                    Number of days to retain data. Must be 0 or at least 7 days.
+                    Number of days to retain data. Must be 0 or at least 3 days.
                     Requires data-retention entitlement for non-zero values.
                     Optional.
               required:
@@ -4107,6 +4409,17 @@ paths:
             items:
               type: string
               nullable: true
+        - name: fields
+          in: query
+          description: >-
+            Comma-separated list of fields to include in the response. Available
+            field groups are 'core' (always included), 'io' (input, output,
+            metadata), 'scores', 'observations', 'metrics'. If not provided, all
+            fields are included. Example: 'core,scores,metrics'
+          required: false
+          schema:
+            type: string
+            nullable: true
       responses:
         '200':
           description: ''
@@ -4294,6 +4607,22 @@ components:
       required:
         - data
         - meta
+    CreateAnnotationQueueRequest:
+      title: CreateAnnotationQueueRequest
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        scoreConfigIds:
+          type: array
+          items:
+            type: string
+      required:
+        - name
+        - scoreConfigIds
     CreateAnnotationQueueItemRequest:
       title: CreateAnnotationQueueItemRequest
       type: object
@@ -4327,6 +4656,36 @@ components:
       required:
         - success
         - message
+    AnnotationQueueAssignmentRequest:
+      title: AnnotationQueueAssignmentRequest
+      type: object
+      properties:
+        userId:
+          type: string
+      required:
+        - userId
+    DeleteAnnotationQueueAssignmentResponse:
+      title: DeleteAnnotationQueueAssignmentResponse
+      type: object
+      properties:
+        success:
+          type: boolean
+      required:
+        - success
+    CreateAnnotationQueueAssignmentResponse:
+      title: CreateAnnotationQueueAssignmentResponse
+      type: object
+      properties:
+        userId:
+          type: string
+        queueId:
+          type: string
+        projectId:
+          type: string
+      required:
+        - userId
+        - queueId
+        - projectId
     CreateCommentRequest:
       title: CreateCommentRequest
       type: object
@@ -5334,19 +5693,19 @@ components:
           type: number
           format: double
           nullable: true
-          description: Price (USD) per input unit
+          description: Deprecated. See 'prices' instead. Price (USD) per input unit
         outputPrice:
           type: number
           format: double
           nullable: true
-          description: Price (USD) per output unit
+          description: Deprecated. See 'prices' instead. Price (USD) per output unit
         totalPrice:
           type: number
           format: double
           nullable: true
           description: >-
-            Price (USD) per total unit. Cannot be set if input or output price
-            is set.
+            Deprecated. See 'prices' instead. Price (USD) per total unit. Cannot
+            be set if input or output price is set.
         tokenizerId:
           type: string
           nullable: true
@@ -5360,11 +5719,26 @@ components:
             JSON. See docs for more details.
         isLangfuseManaged:
           type: boolean
+        prices:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelPrice'
+          description: Price (USD) by usage type
       required:
         - id
         - modelName
         - matchPattern
         - isLangfuseManaged
+        - prices
+    ModelPrice:
+      title: ModelPrice
+      type: object
+      properties:
+        price:
+          type: number
+          format: double
+      required:
+        - price
     ModelUsageUnit:
       title: ModelUsageUnit
       type: string
@@ -5698,6 +6072,13 @@ components:
         - SPAN
         - GENERATION
         - EVENT
+        - AGENT
+        - TOOL
+        - CHAIN
+        - RETRIEVER
+        - EVALUATOR
+        - EMBEDDING
+        - GUARDRAIL
     IngestionUsage:
       title: IngestionUsage
       oneOf:
@@ -6253,6 +6634,122 @@ components:
             type: integer
         - $ref: '#/components/schemas/OpenAICompletionUsageSchema'
         - $ref: '#/components/schemas/OpenAIResponseUsageSchema'
+    LlmConnection:
+      title: LlmConnection
+      type: object
+      description: LLM API connection configuration (secrets excluded)
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+          description: >-
+            Provider name (e.g., 'openai', 'my-gateway'). Must be unique in
+            project, used for upserting.
+        adapter:
+          type: string
+          description: The adapter used to interface with the LLM
+        displaySecretKey:
+          type: string
+          description: Masked version of the secret key for display purposes
+        baseURL:
+          type: string
+          nullable: true
+          description: Custom base URL for the LLM API
+        customModels:
+          type: array
+          items:
+            type: string
+          description: List of custom model names available for this connection
+        withDefaultModels:
+          type: boolean
+          description: Whether to include default models for this adapter
+        extraHeaderKeys:
+          type: array
+          items:
+            type: string
+          description: >-
+            Keys of extra headers sent with requests (values excluded for
+            security)
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - provider
+        - adapter
+        - displaySecretKey
+        - customModels
+        - withDefaultModels
+        - extraHeaderKeys
+        - createdAt
+        - updatedAt
+    PaginatedLlmConnections:
+      title: PaginatedLlmConnections
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/LlmConnection'
+        meta:
+          $ref: '#/components/schemas/utilsMetaResponse'
+      required:
+        - data
+        - meta
+    UpsertLlmConnectionRequest:
+      title: UpsertLlmConnectionRequest
+      type: object
+      description: Request to create or update an LLM connection (upsert)
+      properties:
+        provider:
+          type: string
+          description: >-
+            Provider name (e.g., 'openai', 'my-gateway'). Must be unique in
+            project, used for upserting.
+        adapter:
+          $ref: '#/components/schemas/LlmAdapter'
+          description: The adapter used to interface with the LLM
+        secretKey:
+          type: string
+          description: Secret key for the LLM API.
+        baseURL:
+          type: string
+          nullable: true
+          description: Custom base URL for the LLM API
+        customModels:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: List of custom model names
+        withDefaultModels:
+          type: boolean
+          nullable: true
+          description: Whether to include default models. Default is true.
+        extraHeaders:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+          description: Extra headers to send with requests
+      required:
+        - provider
+        - adapter
+        - secretKey
+    LlmAdapter:
+      title: LlmAdapter
+      type: string
+      enum:
+        - anthropic
+        - openai
+        - azure
+        - bedrock
+        - google-vertex-ai
+        - google-ai-studio
     GetMediaResponse:
       title: GetMediaResponse
       type: object
@@ -6386,52 +6883,6 @@ components:
         - application/xml
         - application/octet-stream
       description: The MIME type of the media record
-    MembershipRole:
-      title: MembershipRole
-      type: string
-      enum:
-        - OWNER
-        - ADMIN
-        - MEMBER
-        - VIEWER
-    MembershipRequest:
-      title: MembershipRequest
-      type: object
-      properties:
-        userId:
-          type: string
-        role:
-          $ref: '#/components/schemas/MembershipRole'
-      required:
-        - userId
-        - role
-    MembershipResponse:
-      title: MembershipResponse
-      type: object
-      properties:
-        userId:
-          type: string
-        role:
-          $ref: '#/components/schemas/MembershipRole'
-        email:
-          type: string
-        name:
-          type: string
-      required:
-        - userId
-        - role
-        - email
-        - name
-    MembershipsResponse:
-      title: MembershipsResponse
-      type: object
-      properties:
-        memberships:
-          type: array
-          items:
-            $ref: '#/components/schemas/MembershipResponse'
-      required:
-        - memberships
     MetricsResponse:
       title: MetricsResponse
       type: object
@@ -6446,81 +6897,10 @@ components:
             and dimensions requested in the query.
 
             Format varies based on the query parameters.
+
+            Histograms will return an array with [lower, upper, height] tuples.
       required:
         - data
-    DailyMetrics:
-      title: DailyMetrics
-      type: object
-      properties:
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/DailyMetricsDetails'
-          description: A list of daily metrics, only days with ingested data are included.
-        meta:
-          $ref: '#/components/schemas/utilsMetaResponse'
-      required:
-        - data
-        - meta
-    DailyMetricsDetails:
-      title: DailyMetricsDetails
-      type: object
-      properties:
-        date:
-          type: string
-          format: date
-        countTraces:
-          type: integer
-        countObservations:
-          type: integer
-        totalCost:
-          type: number
-          format: double
-          description: Total model cost in USD
-        usage:
-          type: array
-          items:
-            $ref: '#/components/schemas/UsageByModel'
-      required:
-        - date
-        - countTraces
-        - countObservations
-        - totalCost
-        - usage
-    UsageByModel:
-      title: UsageByModel
-      type: object
-      description: >-
-        Daily usage of a given model. Usage corresponds to the unit set for the
-        specific model (e.g. tokens).
-      properties:
-        model:
-          type: string
-          nullable: true
-        inputUsage:
-          type: integer
-          description: Total number of generation input units (e.g. tokens)
-        outputUsage:
-          type: integer
-          description: Total number of generation output units (e.g. tokens)
-        totalUsage:
-          type: integer
-          description: Total number of generation total units (e.g. tokens)
-        countTraces:
-          type: integer
-        countObservations:
-          type: integer
-        totalCost:
-          type: number
-          format: double
-          description: Total model cost in USD
-      required:
-        - inputUsage
-        - outputUsage
-        - totalUsage
-        - countTraces
-        - countObservations
-        - totalCost
     PaginatedModels:
       title: PaginatedModels
       type: object
@@ -6617,6 +6997,104 @@ components:
       required:
         - data
         - meta
+    MembershipRole:
+      title: MembershipRole
+      type: string
+      enum:
+        - OWNER
+        - ADMIN
+        - MEMBER
+        - VIEWER
+    MembershipRequest:
+      title: MembershipRequest
+      type: object
+      properties:
+        userId:
+          type: string
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+      required:
+        - userId
+        - role
+    DeleteMembershipRequest:
+      title: DeleteMembershipRequest
+      type: object
+      properties:
+        userId:
+          type: string
+      required:
+        - userId
+    MembershipResponse:
+      title: MembershipResponse
+      type: object
+      properties:
+        userId:
+          type: string
+        role:
+          $ref: '#/components/schemas/MembershipRole'
+        email:
+          type: string
+        name:
+          type: string
+      required:
+        - userId
+        - role
+        - email
+        - name
+    MembershipDeletionResponse:
+      title: MembershipDeletionResponse
+      type: object
+      properties:
+        message:
+          type: string
+        userId:
+          type: string
+      required:
+        - message
+        - userId
+    MembershipsResponse:
+      title: MembershipsResponse
+      type: object
+      properties:
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/MembershipResponse'
+      required:
+        - memberships
+    OrganizationProject:
+      title: OrganizationProject
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - createdAt
+        - updatedAt
+    OrganizationProjectsResponse:
+      title: OrganizationProjectsResponse
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationProject'
+      required:
+        - projects
     Projects:
       title: Projects
       type: object
@@ -6641,6 +7119,7 @@ components:
           description: Metadata for the project
         retentionDays:
           type: integer
+          nullable: true
           description: >-
             Number of days to retain data. Null or 0 means no retention. Omitted
             if no retention is configured.
@@ -6648,7 +7127,6 @@ components:
         - id
         - name
         - metadata
-        - retentionDays
     ProjectDeletionResponse:
       title: ProjectDeletionResponse
       type: object
@@ -6814,7 +7292,7 @@ components:
         prompt:
           type: array
           items:
-            $ref: '#/components/schemas/ChatMessage'
+            $ref: '#/components/schemas/ChatMessageWithPlaceholders'
         config:
           nullable: true
         labels:
@@ -6928,6 +7406,31 @@ components:
         - config
         - labels
         - tags
+    ChatMessageWithPlaceholders:
+      title: ChatMessageWithPlaceholders
+      oneOf:
+        - type: object
+          allOf:
+            - type: object
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - chatmessage
+            - $ref: '#/components/schemas/ChatMessage'
+          required:
+            - type
+        - type: object
+          allOf:
+            - type: object
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - placeholder
+            - $ref: '#/components/schemas/PlaceholderMessage'
+          required:
+            - type
     ChatMessage:
       title: ChatMessage
       type: object
@@ -6939,6 +7442,14 @@ components:
       required:
         - role
         - content
+    PlaceholderMessage:
+      title: PlaceholderMessage
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
     TextPrompt:
       title: TextPrompt
       type: object
@@ -6956,7 +7467,7 @@ components:
         prompt:
           type: array
           items:
-            $ref: '#/components/schemas/ChatMessage'
+            $ref: '#/components/schemas/ChatMessageWithPlaceholders'
       required:
         - prompt
       allOf:

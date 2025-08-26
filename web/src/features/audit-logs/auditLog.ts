@@ -7,6 +7,7 @@ import {
 export type AuditableResource =
   | "annotationQueue"
   | "annotationQueueItem"
+  | "annotationQueueAssignment"
   | "organization"
   | "orgMembership"
   | "projectMembership"
@@ -30,9 +31,14 @@ export type AuditableResource =
   | "blobStorageIntegration"
   | "posthogIntegration"
   | "llmApiKey"
+  | "llmTool"
+  | "llmSchema"
   | "batchExport"
   | "stripeCheckoutSession"
   | "batchAction"
+  | "automation"
+  | "action"
+  | "slackIntegration"
   // legacy resources
   | "membership";
 

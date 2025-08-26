@@ -87,9 +87,10 @@ export default function BackgroundMigrationsTable() {
       <Header title="Background Migrations" />
       <DataTableToolbar columns={columns} />
       <DataTable
+        tableName={"backgroundMigrations"}
         columns={columns}
         data={
-          backgroundMigrations.isLoading
+          backgroundMigrations.isPending
             ? { isLoading: true, isError: false }
             : backgroundMigrations.isError
               ? {
@@ -100,7 +101,7 @@ export default function BackgroundMigrationsTable() {
               : {
                   isLoading: false,
                   isError: false,
-                  data: backgroundMigrations.data.migrations,
+                  data: backgroundMigrations.data?.migrations ?? [],
                 }
         }
       />

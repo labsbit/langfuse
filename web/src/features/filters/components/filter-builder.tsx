@@ -104,7 +104,7 @@ export function PopoverFilterBuilder({
         }}
       >
         <PopoverTrigger asChild>
-          <Button variant="outline">
+          <Button variant="outline" type="button">
             <span>Filters</span>
             {filterState.length > 0 && filterState.length < 3 ? (
               <InlineFilterState
@@ -142,8 +142,9 @@ export function PopoverFilterBuilder({
         <Button
           onClick={() => setWipFilterState([])}
           variant="ghost"
+          type="button"
           size="icon"
-          className="ml-2"
+          className="ml-0.5"
         >
           <X className="h-4 w-4" />
         </Button>
@@ -586,6 +587,7 @@ function FilterBuilderForm({
                   <Button
                     onClick={() => removeFilter(i)}
                     variant="ghost"
+                    type="button"
                     disabled={disabled}
                     size="xs"
                   >
@@ -602,7 +604,7 @@ function FilterBuilderForm({
           onClick={() => addNewFilter()}
           type="button" // required as it will otherwise submit forms where this component is used
           className="mt-2"
-          variant="ghost"
+          variant="outline"
           size="sm"
         >
           <Plus className="mr-2 h-4 w-4" />

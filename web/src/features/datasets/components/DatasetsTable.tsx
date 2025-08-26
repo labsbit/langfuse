@@ -25,7 +25,7 @@ import { useEffect } from "react";
 import useColumnVisibility from "@/src/features/column-visibility/hooks/useColumnVisibility";
 import { DataTableToolbar } from "@/src/components/table/data-table-toolbar";
 import { TableViewPresetTableName, type Prisma } from "@langfuse/shared";
-import { IOTableCell } from "@/src/components/ui/CodeJsonViewer";
+import { IOTableCell } from "@/src/components/ui/IOTableCell";
 import { useRowHeightLocalStorage } from "@/src/components/table/data-table-row-height-switch";
 import useColumnOrder from "@/src/features/column-visibility/hooks/useColumnOrder";
 import { LocalIsoDate } from "@/src/components/LocalIsoDate";
@@ -110,7 +110,11 @@ export function DatasetsTable(props: { projectId: string }) {
       size: 200,
       cell: ({ row }) => {
         const description: RowData["description"] = row.getValue("description");
-        return <div className="h-full overflow-y-auto">{description}</div>;
+        return (
+          <div className="flex h-full items-center overflow-y-auto">
+            {description}
+          </div>
+        );
       },
     },
     {
@@ -189,6 +193,7 @@ export function DatasetsTable(props: { projectId: string }) {
                   datasetId={key.id}
                   datasetName={key.name}
                   datasetDescription={row.getValue("description") ?? undefined}
+                  datasetMetadata={row.getValue("metadata") ?? undefined}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
@@ -277,6 +282,7 @@ export function DatasetsTable(props: { projectId: string }) {
         }}
       />
       <DataTable
+        tableName={"datasets"}
         columns={columns}
         data={
           datasets.isLoading || isViewLoading

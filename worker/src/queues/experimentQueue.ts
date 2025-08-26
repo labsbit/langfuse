@@ -1,29 +1,41 @@
 import { Job } from "bullmq";
 import {
-  ExperimentMetadataSchema,
+  ExperimentCreateQueue,
+  QueueJobs,
   QueueName,
   TQueueJobTypes,
   logger,
   traceException,
 } from "@langfuse/shared/src/server";
-import { createExperimentJob } from "../ee/experiments/experimentService";
 import { InvalidRequestError, LangfuseNotFoundError } from "@langfuse/shared";
 import { kyselyPrisma } from "@langfuse/shared/src/db";
+import { handleRetryableError } from "../features/utils";
+import { delayInMs } from "./utils/delays";
+import { createExperimentJobClickhouse } from "../features/experiments/experimentServiceClickhouse";
 
 export const experimentCreateQueueProcessor = async (
   job: Job<TQueueJobTypes[QueueName.ExperimentCreate]>,
 ) => {
   try {
-    logger.info("Starting to process experiment create job", {
-      jobId: job.id,
-      attempt: job.attemptsMade,
-      data: job.data,
-    });
-    await createExperimentJob({
+    await createExperimentJobClickhouse({
       event: job.data.payload,
     });
     return true;
   } catch (e) {
+    // If creating any of the dataset run items associated with this experiment create job fails with a 429, we want to retry the experiment creation job unless it's older than 24h.
+    const wasRetried = await handleRetryableError(e, job, {
+      table: "dataset_runs",
+      idField: "runId",
+      queue: ExperimentCreateQueue.getInstance(),
+      queueName: QueueName.ExperimentCreate,
+      jobName: QueueJobs.ExperimentCreateJob,
+      delayFn: delayInMs,
+    });
+
+    if (wasRetried) {
+      return;
+    }
+
     if (
       e instanceof InvalidRequestError ||
       e instanceof LangfuseNotFoundError
@@ -41,29 +53,17 @@ export const experimentCreateQueueProcessor = async (
           .where("project_id", "=", job.data.payload.projectId)
           .executeTakeFirst();
 
-        if (
-          !currentRun ||
-          !currentRun.metadata ||
-          !ExperimentMetadataSchema.safeParse(currentRun.metadata).success
-        ) {
+        if (!currentRun) {
+          logger.info(
+            `Dataset run configuration is invalid for run ${job.data.payload.runId}`,
+          );
+          // attempt retrying the job as the run may be created in the meantime
           throw new LangfuseNotFoundError(
             `Dataset run ${job.data.payload.runId} not found`,
           );
         }
 
-        // update experiment run metadata field with error
-        await kyselyPrisma.$kysely
-          .updateTable("dataset_runs")
-          .set({
-            metadata: {
-              ...currentRun.metadata,
-              error: e.message,
-            },
-          })
-          .where("id", "=", job.data.payload.runId)
-          .where("project_id", "=", job.data.payload.projectId)
-          .execute();
-
+        // error cases of invalid configuration (prompt, api key, etc) are handled on the DRI level
         // return true to indicate job was processed successfully and avoid retrying
         return true;
       } catch (e) {

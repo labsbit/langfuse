@@ -1,5 +1,6 @@
 import {
   type Observation,
+  ObservationLevel,
   paginationMetaResponseZod,
   publicApiPaginationZod,
 } from "@langfuse/shared";
@@ -9,13 +10,24 @@ import {
   stringDateTime,
 } from "@langfuse/shared/src/server";
 import type Decimal from "decimal.js";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 /**
  * Objects
  */
 
-const ObservationType = z.enum(["GENERATION", "SPAN", "EVENT"]);
+const ObservationType = z.enum([
+  "GENERATION",
+  "SPAN",
+  "EVENT",
+  "AGENT",
+  "TOOL",
+  "CHAIN",
+  "RETRIEVER",
+  "EVALUATOR",
+  "EMBEDDING",
+  "GUARDRAIL",
+]);
 
 export const APIObservation = z
   .object({
@@ -37,7 +49,6 @@ export const APIObservation = z
     level: z.enum(["DEBUG", "DEFAULT", "WARNING", "ERROR"]),
     statusMessage: z.string().nullable(),
 
-    // GENERATION only
     model: z.string().nullable(),
     modelParameters: z.any(),
     completionStartTime: z.coerce.date().nullable(),
@@ -159,6 +170,7 @@ export const GetObservationsV1Query = z.object({
   type: ObservationType.nullish(),
   name: z.string().nullish(),
   userId: z.string().nullish(),
+  level: z.enum(ObservationLevel).nullish(),
   traceId: z.string().nullish(),
   version: z.string().nullish(),
   parentObservationId: z.string().nullish(),

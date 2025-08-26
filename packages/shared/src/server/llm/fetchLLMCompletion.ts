@@ -1,4 +1,6 @@
-import { type ZodSchema } from "zod";
+// We need to use Zod3 for structured outputs due to a bug in
+// ChatVertexAI. See issue: https://github.com/langfuse/langfuse/issues/7429
+import { type ZodSchema } from "zod/v3";
 
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatVertexAI } from "@langchain/google-vertexai";
@@ -16,10 +18,13 @@ import {
   StringOutputParser,
 } from "@langchain/core/output_parsers";
 import { IterableReadableStream } from "@langchain/core/utils/stream";
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatOpenAI, AzureChatOpenAI } from "@langchain/openai";
+import { env } from "../../env";
 import GCPServiceAccountKeySchema, {
   BedrockConfigSchema,
   BedrockCredentialSchema,
+  VertexAIConfigSchema,
+  BEDROCK_USE_DEFAULT_CREDENTIALS,
 } from "../../interfaces/customLLMProviderConfigSchemas";
 import { processEventBatch } from "../ingestion/processEventBatch";
 import { logger } from "../logger";
@@ -37,6 +42,9 @@ import {
 } from "./types";
 import { CallbackHandler } from "langfuse-langchain";
 import type { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+import { HttpsProxyAgent } from "https-proxy-agent";
+
+const isLangfuseCloud = Boolean(env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION);
 
 type ProcessTracedEvents = () => Promise<void>;
 
@@ -60,6 +68,7 @@ type FetchLLMCompletionParams = LLMCompletionParams & {
 };
 
 export async function fetchLLMCompletion(
+  // eslint-disable-next-line no-unused-vars
   params: LLMCompletionParams & {
     streaming: true;
   },
@@ -69,6 +78,7 @@ export async function fetchLLMCompletion(
 }>;
 
 export async function fetchLLMCompletion(
+  // eslint-disable-next-line no-unused-vars
   params: LLMCompletionParams & {
     streaming: false;
   },
@@ -78,6 +88,7 @@ export async function fetchLLMCompletion(
 }>;
 
 export async function fetchLLMCompletion(
+  // eslint-disable-next-line no-unused-vars
   params: LLMCompletionParams & {
     streaming: false;
     structuredOutputSchema: ZodSchema;
@@ -88,6 +99,7 @@ export async function fetchLLMCompletion(
 }>;
 
 export async function fetchLLMCompletion(
+  // eslint-disable-next-line no-unused-vars
   params: LLMCompletionParams & {
     tools: LLMToolDefinition[];
     streaming: false;
@@ -130,7 +142,7 @@ export async function fetchLLMCompletion(
     const handler = new CallbackHandler({
       _projectId: traceParams.projectId,
       _isLocalEventExportEnabled: true,
-      tags: traceParams.tags,
+      environment: traceParams.environment,
     });
     finalCallbacks.push(handler);
 
@@ -142,6 +154,7 @@ export async function fetchLLMCompletion(
         await processEventBatch(
           JSON.parse(JSON.stringify(events)), // stringify to emulate network event batch from network call
           traceParams.authCheck,
+          { isLangfuseInternal: true },
         );
       } catch (e) {
         logger.error("Failed to process traced events", { error: e });
@@ -151,28 +164,48 @@ export async function fetchLLMCompletion(
 
   finalCallbacks = finalCallbacks.length > 0 ? finalCallbacks : undefined;
 
+  // Helper function to safely stringify content
+  const safeStringify = (content: any): string => {
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return "[Unserializable content]";
+    }
+  };
+
   let finalMessages: BaseMessage[];
   // VertexAI requires at least 1 user message
   if (modelParams.adapter === LLMAdapter.VertexAI && messages.length === 1) {
-    finalMessages = [new HumanMessage(messages[0].content)];
+    const safeContent =
+      typeof messages[0].content === "string"
+        ? messages[0].content
+        : JSON.stringify(messages[0].content);
+    finalMessages = [new HumanMessage(safeContent)];
   } else {
     finalMessages = messages.map((message) => {
+      // For arbitrary content types, convert to string safely
+      const safeContent =
+        typeof message.content === "string"
+          ? message.content
+          : safeStringify(message.content);
+
       if (message.role === ChatMessageRole.User)
-        return new HumanMessage(message.content);
+        return new HumanMessage(safeContent);
       if (
         message.role === ChatMessageRole.System ||
         message.role === ChatMessageRole.Developer
       )
-        return new SystemMessage(message.content);
+        return new SystemMessage(safeContent);
 
-      if (message.type === ChatMessageType.ToolResult)
+      if (message.type === ChatMessageType.ToolResult) {
         return new ToolMessage({
-          content: message.content,
+          content: safeContent,
           tool_call_id: message.toolCallId,
         });
+      }
 
       return new AIMessage({
-        content: message.content,
+        content: safeContent,
         tool_calls:
           message.type === ChatMessageType.AssistantToolCall
             ? (message.toolCalls as any)
@@ -184,6 +217,10 @@ export async function fetchLLMCompletion(
   finalMessages = finalMessages.filter(
     (m) => m.content.length > 0 || "tool_calls" in m,
   );
+
+  // Common proxy configuration for all adapters
+  const proxyUrl = env.HTTPS_PROXY;
+  const proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
 
   let chatModel:
     | ChatOpenAI
@@ -200,7 +237,12 @@ export async function fetchLLMCompletion(
       maxTokens: modelParams.max_tokens,
       topP: modelParams.top_p,
       callbacks: finalCallbacks,
-      clientOptions: { maxRetries, timeout: 1000 * 60 * 2 }, // 2 minutes timeout
+      clientOptions: {
+        maxRetries,
+        timeout: 1000 * 60 * 2, // 2 minutes timeout
+        ...(proxyAgent && { httpAgent: proxyAgent }),
+      },
+      invocationKwargs: modelParams.providerOptions,
     });
   } else if (modelParams.adapter === LLMAdapter.OpenAI) {
     chatModel = new ChatOpenAI({
@@ -215,11 +257,13 @@ export async function fetchLLMCompletion(
       configuration: {
         baseURL,
         defaultHeaders: extraHeaders,
+        ...(proxyAgent && { httpAgent: proxyAgent }),
       },
+      modelKwargs: modelParams.providerOptions,
       timeout: 1000 * 60 * 2, // 2 minutes timeout
     });
   } else if (modelParams.adapter === LLMAdapter.Azure) {
-    chatModel = new ChatOpenAI({
+    chatModel = new AzureChatOpenAI({
       azureOpenAIApiKey: apiKey,
       azureOpenAIBasePath: baseURL,
       azureOpenAIApiDeploymentName: modelParams.model,
@@ -232,11 +276,17 @@ export async function fetchLLMCompletion(
       timeout: 1000 * 60 * 2, // 2 minutes timeout
       configuration: {
         defaultHeaders: extraHeaders,
+        ...(proxyAgent && { httpAgent: proxyAgent }),
       },
+      modelKwargs: modelParams.providerOptions,
     });
   } else if (modelParams.adapter === LLMAdapter.Bedrock) {
     const { region } = BedrockConfigSchema.parse(config);
-    const credentials = BedrockCredentialSchema.parse(JSON.parse(apiKey));
+    // Handle both explicit credentials and default provider chain
+    const credentials =
+      apiKey === BEDROCK_USE_DEFAULT_CREDENTIALS && !isLangfuseCloud
+        ? undefined // undefined = use AWS SDK default credential provider chain
+        : BedrockCredentialSchema.parse(JSON.parse(apiKey));
 
     chatModel = new ChatBedrockConverse({
       model: modelParams.model,
@@ -248,9 +298,13 @@ export async function fetchLLMCompletion(
       callbacks: finalCallbacks,
       maxRetries,
       timeout: 1000 * 60 * 2, // 2 minutes timeout
+      additionalModelRequestFields: modelParams.providerOptions as any,
     });
   } else if (modelParams.adapter === LLMAdapter.VertexAI) {
     const credentials = GCPServiceAccountKeySchema.parse(JSON.parse(apiKey));
+    const { location } = config
+      ? VertexAIConfigSchema.parse(config)
+      : { location: undefined };
 
     // Requests time out after 60 seconds for both public and private endpoints by default
     // Reference: https://cloud.google.com/vertex-ai/docs/predictions/get-online-predictions#send-request
@@ -261,6 +315,7 @@ export async function fetchLLMCompletion(
       topP: modelParams.top_p,
       callbacks: finalCallbacks,
       maxRetries,
+      location,
       authOptions: {
         projectId: credentials.project_id,
         credentials,
@@ -275,22 +330,6 @@ export async function fetchLLMCompletion(
       callbacks: finalCallbacks,
       maxRetries,
       apiKey,
-    });
-  } else if (modelParams.adapter === LLMAdapter.Atla) {
-    // Atla models do not support:
-    // - temperature
-    // - max_tokens
-    // - top_p
-    chatModel = new ChatOpenAI({
-      openAIApiKey: apiKey,
-      modelName: modelParams.model,
-      callbacks: finalCallbacks,
-      maxRetries,
-      configuration: {
-        baseURL: baseURL,
-        defaultHeaders: extraHeaders,
-      },
-      timeout: 1000 * 60, // 1 minute timeout
     });
   } else {
     // eslint-disable-next-line no-unused-vars
@@ -312,51 +351,6 @@ export async function fetchLLMCompletion(
         completion: await (chatModel as ChatOpenAI) // Typecast necessary due to https://github.com/langchain-ai/langchainjs/issues/6795
           .withStructuredOutput(params.structuredOutputSchema)
           .invoke(finalMessages, runConfig),
-        processTracedEvents,
-      };
-    }
-
-    /*
-  Workaround OpenAI reasoning models:
-  
-  This is a temporary workaround to avoid sending unsupported parameters to OpenAI's O1 models.
-  O1 models do not support:
-  - system messages
-  - top_p
-  - max_tokens at all, one has to use max_completion_tokens instead
-  - temperature different than 1
-
-  Reference: https://platform.openai.com/docs/guides/reasoning/beta-limitations
-  */
-    if (
-      modelParams.model.startsWith("o1-") ||
-      modelParams.model.startsWith("o3-")
-    ) {
-      const filteredMessages = finalMessages.filter((message) => {
-        return (
-          modelParams.model.startsWith("o3-") || message._getType() !== "system"
-        );
-      });
-
-      return {
-        completion: await new ChatOpenAI({
-          openAIApiKey: apiKey,
-          modelName: modelParams.model,
-          temperature: 1,
-          maxTokens: undefined,
-          topP: undefined,
-          callbacks,
-          maxRetries,
-          modelKwargs: {
-            max_completion_tokens: modelParams.max_tokens,
-          },
-          configuration: {
-            baseURL,
-          },
-          timeout: 1000 * 60 * 2, // 2 minutes timeout
-        })
-          .pipe(new StringOutputParser())
-          .invoke(filteredMessages, runConfig),
         processTracedEvents,
       };
     }

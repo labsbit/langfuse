@@ -11,7 +11,11 @@ import * as clickhouseWriteExports from "../../ClickhouseWriter";
 
 const mockAddToClickhouseWriter = vi.fn();
 const mockClickhouseClient = {
-  query: async () => ({ json: async () => [] }),
+  query: async () => ({
+    json: async () => [],
+    query_id: "1",
+    response_headers: { "x-clickhouse-summary": [] },
+  }),
 };
 
 vi.mock("../../ClickhouseWriter", async (importOriginal) => {
@@ -77,6 +81,7 @@ describe("Token Cost Calculation", () => {
       prisma.price.createMany({
         data: modelPrices.map((price) => ({
           modelId,
+          projectId: null,
           usageType: price.usageType,
           price: price.price,
         })),

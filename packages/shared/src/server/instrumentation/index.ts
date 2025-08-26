@@ -22,7 +22,7 @@ export type SpanCtx = {
   traceContext?: TCarrier;
 };
 
-type AsyncCallbackFn<T> = (span: opentelemetry.Span) => Promise<T>;
+type AsyncCallbackFn<T> = (span: opentelemetry.Span) => Promise<T>; // eslint-disable-line no-unused-vars
 
 export async function instrumentAsync<T>(
   ctx: SpanCtx,
@@ -43,6 +43,14 @@ export async function instrumentAsync<T>(
     },
     activeContext,
     async (span) => {
+      const baggage = opentelemetry.propagation.getBaggage(
+        opentelemetry.context.active(),
+      );
+      if (baggage) {
+        baggage
+          .getAllEntries()
+          .forEach(([k, v]) => span.setAttribute(k, v.value));
+      }
       try {
         const result = await callback(span);
         span.end();
@@ -56,7 +64,7 @@ export async function instrumentAsync<T>(
   );
 }
 
-type SyncCallbackFn<T> = (span: opentelemetry.Span) => T;
+type SyncCallbackFn<T> = (span: opentelemetry.Span) => T; // eslint-disable-line no-unused-vars
 
 export function instrumentSync<T>(
   ctx: SpanCtx,
@@ -77,6 +85,14 @@ export function instrumentSync<T>(
     },
     activeContext,
     (span) => {
+      const baggage = opentelemetry.propagation.getBaggage(
+        opentelemetry.context.active(),
+      );
+      if (baggage) {
+        baggage
+          .getAllEntries()
+          .forEach(([k, v]) => span.setAttribute(k, v.value));
+      }
       try {
         const result = callback(span);
         span.end();
@@ -157,12 +173,43 @@ export const addUserToSpan = (
     return;
   }
 
-  attributes.userId && activeSpan.setAttribute("user.id", attributes.userId);
-  attributes.email && activeSpan.setAttribute("user.email", attributes.email);
-  attributes.projectId &&
-    activeSpan.setAttribute("project.id", attributes.projectId);
-  attributes.orgId && activeSpan.setAttribute("org.id", attributes.orgId);
-  attributes.plan && activeSpan.setAttribute("org.plan", attributes.plan);
+  const ctx = opentelemetry.context.active();
+  let baggage =
+    opentelemetry.propagation.getBaggage(ctx) ??
+    opentelemetry.propagation.createBaggage();
+
+  if (attributes.userId) {
+    baggage = baggage.setEntry("user.id", {
+      value: attributes.userId,
+    });
+    activeSpan.setAttribute("user.id", attributes.userId);
+  }
+  if (attributes.email) {
+    baggage = baggage.setEntry("user.email", {
+      value: attributes.email,
+    });
+    activeSpan.setAttribute("user.email", attributes.email);
+  }
+  if (attributes.projectId) {
+    baggage = baggage.setEntry("langfuse.project.id", {
+      value: attributes.projectId,
+    });
+    activeSpan.setAttribute("langfuse.project.id", attributes.projectId);
+  }
+  if (attributes.orgId) {
+    baggage = baggage.setEntry("langfuse.org.id", {
+      value: attributes.orgId,
+    });
+    activeSpan.setAttribute("langfuse.org.id", attributes.orgId);
+  }
+  if (attributes.plan) {
+    baggage = baggage.setEntry("langfuse.org.plan", {
+      value: attributes.plan,
+    });
+    activeSpan.setAttribute("langfuse.org.plan", attributes.plan);
+  }
+
+  return opentelemetry.propagation.setBaggage(ctx, baggage);
 };
 
 export const getTracer = (name: string) => opentelemetry.trace.getTracer(name);

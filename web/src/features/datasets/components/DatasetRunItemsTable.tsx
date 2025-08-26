@@ -11,7 +11,8 @@ import { useDetailPageLists } from "@/src/features/navigate-detail-pages/context
 import { useEffect, useMemo } from "react";
 import { useRowHeightLocalStorage } from "@/src/components/table/data-table-row-height-switch";
 import { cn } from "@/src/utils/tailwind";
-import { IOTableCell } from "@/src/components/ui/CodeJsonViewer";
+import { MemoizedIOTableCell } from "@/src/components/ui/IOTableCell";
+import { IOTableCell } from "@/src/components/ui/IOTableCell";
 import { ListTree } from "lucide-react";
 import {
   getScoreGroupColumnProps,
@@ -60,11 +61,13 @@ export function DatasetRunItemsTable(
     pageIndex: withDefault(NumberParam, 0),
     pageSize: withDefault(NumberParam, 20),
   });
+
   const runItems = api.datasets.runitemsByRunIdOrItemId.useQuery({
     ...props,
     page: paginationState.pageIndex,
     limit: paginationState.pageSize,
   });
+
   const [rowHeight, setRowHeight] = useRowHeightLocalStorage("traces", "m");
 
   useEffect(() => {
@@ -178,7 +181,7 @@ export function DatasetRunItemsTable(
     { ...getScoreGroupColumnProps(isColumnLoading), columns: scoreColumns },
     {
       accessorKey: "input",
-      header: "Input",
+      header: `${"datasetItemId" in props ? "Trace Input" : "Input"}`,
       id: "input",
       size: 200,
       enableHiding: true,
@@ -199,7 +202,7 @@ export function DatasetRunItemsTable(
     },
     {
       accessorKey: "output",
-      header: "Output",
+      header: `${"datasetItemId" in props ? "Trace Output" : "Output"}`,
       id: "output",
       size: 200,
       enableHiding: true,
@@ -292,6 +295,7 @@ export function DatasetRunItemsTable(
         setRowHeight={setRowHeight}
       />
       <DataTable
+        tableName={"datasetRunItems"}
         columns={columns}
         data={
           runItems.isLoading
@@ -348,13 +352,8 @@ const TraceObservationIOCell = ({
     { traceId, projectId, fromTimestamp: fromTimestampModified },
     {
       enabled: observationId === undefined,
-      trpc: {
-        context: {
-          skipBatch: true,
-        },
-      },
       refetchOnMount: false, // prevents refetching loops
-      onError: () => {},
+      staleTime: 60 * 1000, // 1 minute
     },
   );
   const observation = api.observations.byId.useQuery(
@@ -365,20 +364,15 @@ const TraceObservationIOCell = ({
     },
     {
       enabled: observationId !== undefined,
-      trpc: {
-        context: {
-          skipBatch: true,
-        },
-      },
       refetchOnMount: false, // prevents refetching loops
-      onError: () => {},
+      staleTime: 60 * 1000, // 1 minute
     },
   );
 
   const data = observationId === undefined ? trace.data : observation.data;
 
   return (
-    <IOTableCell
+    <MemoizedIOTableCell
       isLoading={
         (!!!observationId ? trace.isLoading : observation.isLoading) || !data
       }

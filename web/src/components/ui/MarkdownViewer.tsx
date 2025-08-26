@@ -11,7 +11,6 @@ import {
 import ReactMarkdown, { type Options } from "react-markdown";
 import Link from "next/link";
 import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { CodeBlock } from "@/src/components/ui/Codeblock";
 import { useTheme } from "next-themes";
 import { ImageOff, Info } from "lucide-react";
@@ -27,12 +26,14 @@ import {
   isOpenAITextContentPart,
   isOpenAIImageContentPart,
 } from "@/src/components/schemas/ChatMlSchema";
-import { type z } from "zod";
+import { type z } from "zod/v4";
 import { ResizableImage } from "@/src/components/ui/resizable-image";
 import { LangfuseMediaView } from "@/src/components/ui/LangfuseMediaView";
 import { type MediaReturnType } from "@/src/features/media/validation";
 import { JSONView } from "@/src/components/ui/CodeJsonViewer";
 import { MarkdownJsonViewHeader } from "@/src/components/ui/MarkdownJsonView";
+import { copyTextToClipboard } from "@/src/utils/clipboard";
+import DOMPurify from "dompurify";
 
 type ReactMarkdownNode = ReactMarkdownExtraProps["node"];
 type ReactMarkdownNodeChildren = Exclude<
@@ -49,6 +50,33 @@ const MemoizedReactMarkdown: FC<Options> = memo(
     prevProps.className === nextProps.className,
 );
 
+const getSafeUrl = (href: string | undefined | null): string | null => {
+  if (!href || typeof href !== "string") return null;
+
+  // DOMPurify's default sanitization is quite permissive but safe
+  // It blocks javascript:, data: with scripts, vbscript:, etc.
+  // But allows http:, https:, ftp:, mailto:, tel:, and many others
+  try {
+    const sanitized = DOMPurify.sanitize(href, {
+      // ALLOWED_TAGS: An array of HTML tags that are explicitly permitted in the output.
+      // Setting this to an empty array means that no HTML tags are allowed.
+      // Any HTML tag found within the 'href' string would be stripped out.
+      ALLOWED_TAGS: [],
+
+      // ALLOWED_ATTR: An array of HTML attributes that are explicitly permitted on allowed tags.
+      // Setting this to an empty array means that no HTML attributes are allowed.
+      // Similar to ALLOWED_TAGS, this ensures that if any attributes are somehow
+      // embedded within the URL string (e.g., malformed or attempting injection),
+      // they will be removed by DOMPurify. We only expect a pure URL string.
+      ALLOWED_ATTR: [],
+    });
+
+    return sanitized || null;
+  } catch (error) {
+    return null;
+  }
+};
+
 const isTextElement = (child: ReactNode): child is ReactElement =>
   isValidElement(child) &&
   typeof child.type !== "string" &&
@@ -60,13 +88,12 @@ const isChecklist = (children: ReactNode) =>
 
 const transformListItemChildren = (children: ReactNode) =>
   Children.map(children, (child) =>
-    isTextElement(child) ? (
-      <div className="mb-1 inline-flex">
-        {createElement(child.type, { ...child.props })}
-      </div>
-    ) : (
-      child
-    ),
+    isTextElement(child)
+      ? createElement("span", {
+          ...child.props,
+          className: cn(child.props.className, "mb-1"),
+        })
+      : child,
   );
 
 const isImageNode = (node?: ReactMarkdownNode): boolean =>
@@ -95,35 +122,47 @@ function MarkdownRenderer({
     return (
       <MemoizedReactMarkdown
         className={cn(
-          "space-y-2 overflow-x-auto break-words text-sm",
+          "overflow-x-auto break-words text-sm leading-relaxed",
           className,
         )}
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm]}
         components={{
           p({ children, node }) {
             if (isImageNode(node)) {
               return <>{children}</>;
             }
-            return (
-              <p className="mb-2 whitespace-pre-wrap last:mb-0">{children}</p>
-            );
+            return <p className="mb-2 last:mb-0">{children}</p>;
           },
           a({ children, href }) {
-            if (href)
+            const safeHref = getSafeUrl(href);
+            if (safeHref) {
               return (
-                <Link href={href} className="underline" target="_blank">
+                <Link
+                  href={safeHref}
+                  className="underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {children}
                 </Link>
               );
+            }
+            return (
+              <span className="text-muted-foreground underline">
+                {children}
+              </span>
+            );
           },
           ul({ children }) {
             if (isChecklist(children))
               return <ul className="list-none">{children}</ul>;
 
-            return <ul className="list-inside list-disc">{children}</ul>;
+            return <ul className="mb-1 list-inside list-disc">{children}</ul>;
           },
           ol({ children }) {
-            return <ol className="list-inside list-decimal">{children}</ol>;
+            return (
+              <ol className="mb-1 list-inside list-decimal">{children}</ol>
+            );
           },
           li({ children }) {
             return (
@@ -133,22 +172,42 @@ function MarkdownRenderer({
             );
           },
           pre({ children }) {
-            return <pre className="rounded p-2">{children}</pre>;
+            return <pre className="mb-1 rounded p-2">{children}</pre>;
           },
           h1({ children }) {
-            return <h1 className="text-2xl font-bold">{children}</h1>;
+            return (
+              <h1 className="mb-2 mt-5 border-b pb-2 text-2xl font-bold first:mt-0">
+                {children}
+              </h1>
+            );
           },
           h2({ children }) {
-            return <h2 className="text-xl font-bold">{children}</h2>;
+            return (
+              <h2 className="mb-2 mt-4 text-xl font-bold first:mt-0">
+                {children}
+              </h2>
+            );
           },
           h3({ children }) {
-            return <h3 className="text-lg font-bold">{children}</h3>;
+            return (
+              <h3 className="mb-2 mt-3 text-lg font-bold first:mt-0">
+                {children}
+              </h3>
+            );
           },
           h4({ children }) {
-            return <h4 className="text-base font-bold">{children}</h4>;
+            return (
+              <h4 className="mb-1 mt-2 text-base font-bold first:mt-0">
+                {children}
+              </h4>
+            );
           },
           h5({ children }) {
-            return <h5 className="text-sm font-bold">{children}</h5>;
+            return (
+              <h5 className="mb-1 mt-1 text-sm font-bold first:mt-0">
+                {children}
+              </h5>
+            );
           },
           h6({ children }) {
             return <h6 className="text-xs font-bold">{children}</h6>;
@@ -177,7 +236,7 @@ function MarkdownRenderer({
           },
           blockquote({ children }) {
             return (
-              <blockquote className="border-l-4 pl-4 italic">
+              <blockquote className="mb-1 border-l-4 pl-4 italic">
                 {children}
               </blockquote>
             );
@@ -190,7 +249,7 @@ function MarkdownRenderer({
           },
           table({ children }) {
             return (
-              <div className="overflow-x-auto rounded border text-xs">
+              <div className="mb-1 overflow-x-auto rounded border text-xs">
                 <table className="min-w-full divide-y">{children}</table>
               </div>
             );
@@ -271,7 +330,7 @@ export function MarkdownView({
       typeof markdown === "string"
         ? markdown
         : parseOpenAIContentParts(markdown);
-    void navigator.clipboard.writeText(rawText);
+    void copyTextToClipboard(rawText);
   };
 
   const handleOnValueChange = () => {
