@@ -22,6 +22,8 @@ import { prisma, Role } from "@langfuse/shared/src/db";
 import * as z from "zod/v4";
 import * as opentelemetry from "@opentelemetry/api";
 import { type IncomingHttpHeaders } from "node:http";
+import { getTRPCErrorCodeFromHTTPStatusCode } from "@/src/server/utils/trpc-utils";
+import { sendAdminAccessWebhook } from "@/src/server/adminAccessWebhook";
 
 type CreateContextOptions = {
   session: Session | null;
@@ -43,7 +45,6 @@ export const createInnerTRPCContext = (opts: CreateContextOptions) => {
     session: opts.session,
     headers: opts.headers,
     prisma,
-    DB,
   };
 };
 
@@ -78,18 +79,25 @@ export const createTRPCContext = async (opts: CreateNextContextOptions) => {
  * errors on the backend.
  */
 import { initTRPC, TRPCError } from "@trpc/server";
+import { getHTTPStatusCodeFromError } from "@trpc/server/http";
 import superjson from "superjson";
 import { ZodError } from "zod/v4";
 import { setUpSuperjson } from "@/src/utils/superjson";
-import { DB } from "@/src/server/db";
 import {
   getTraceById,
   logger,
   addUserToSpan,
   contextWithLangfuseProps,
+  ClickHouseResourceError,
 } from "@langfuse/shared/src/server";
 
+import { AdminApiAuthService } from "@/src/ee/features/admin-api/server/adminApiAuth";
+import { env } from "@/src/env.mjs";
+import { BaseError, parseIO } from "@langfuse/shared";
+
 setUpSuperjson();
+
+const isLangfuseCloud = Boolean(env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION);
 
 const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
@@ -119,34 +127,64 @@ const t = initTRPC.context<typeof createTRPCContext>().create({
  */
 export const createTRPCRouter = t.router;
 
+const resolveError = (error: TRPCError) => {
+  if (error.cause instanceof BaseError) {
+    return {
+      code: getTRPCErrorCodeFromHTTPStatusCode(error.cause.httpCode),
+      httpStatus: error.cause.httpCode,
+    };
+  }
+  return { code: error.code, httpStatus: getHTTPStatusCodeFromError(error) };
+};
+
+const logErrorByCode = (errorCode: TRPCError["code"], error: TRPCError) => {
+  if (errorCode === "NOT_FOUND" || errorCode === "UNAUTHORIZED") {
+    logger.info(`middleware intercepted error with code ${errorCode}`, {
+      error,
+    });
+  } else if (errorCode === "UNPROCESSABLE_CONTENT") {
+    logger.warn(`middleware intercepted error with code ${errorCode}`, {
+      error,
+    });
+  } else {
+    logger.error(`middleware intercepted error with code ${errorCode}`, {
+      error,
+    });
+  }
+};
+
 // global error handling
 const withErrorHandling = t.middleware(async ({ ctx, next }) => {
   const res = await next({ ctx }); // pass the context to the next middleware
 
   if (!res.ok) {
-    if (res.error.code === "NOT_FOUND" || res.error.code === "UNAUTHORIZED") {
-      logger.info(
-        `middleware intercepted error with code ${res.error.code}`,
-        res.error,
-      );
+    if (res.error.cause instanceof ClickHouseResourceError) {
+      // Surface ClickHouse errors using an advice message
+      // which is supposed to provide a bit of guidance to the user.
+      logErrorByCode("UNPROCESSABLE_CONTENT", res.error);
+      res.error = new TRPCError({
+        code: "UNPROCESSABLE_CONTENT",
+        message: ClickHouseResourceError.ERROR_ADVICE_MESSAGE,
+      });
     } else {
-      logger.error(
-        `middleware intercepted error with code ${res.error.code}`,
-        res.error,
-      );
-    }
+      // Throw a new TRPC error with:
+      // - The same error code as the original error
+      // - Either the original error message OR "Internal error" if it's a 5xx error
+      const { code, httpStatus } = resolveError(res.error);
+      const isSafeToExpose = httpStatus >= 400 && httpStatus < 500;
+      const errorMessage = isLangfuseCloud
+        ? "We have been notified and are working on it."
+        : "Please check error logs in your self-hosted deployment.";
 
-    // Throw a new TRPC error with:
-    // - The same error code as the original error
-    // - Either the original error message OR "Internal error" if it's an INTERNAL_SERVER_ERROR
-    res.error = new TRPCError({
-      code: res.error.code,
-      cause: null, // do not expose stack traces
-      message:
-        res.error.code !== "INTERNAL_SERVER_ERROR"
+      logErrorByCode(code, res.error);
+      res.error = new TRPCError({
+        code,
+        cause: null, // do not expose stack traces
+        message: isSafeToExpose
           ? res.error.message
-          : "Internal error",
-    });
+          : "Internal error. " + errorMessage,
+      });
+    }
   }
 
   return res;
@@ -203,7 +241,7 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
  *
  * @see https://trpc.io/docs/procedures
  */
-export const protectedProcedure = withOtelTracingProcedure
+export const authenticatedProcedure = withOtelTracingProcedure
   .use(withErrorHandling)
   .use(enforceUserIsAuthed);
 
@@ -260,6 +298,11 @@ const enforceUserIsAuthedAndProjectMember = t.middleware(async (opts) => {
           message: "Project not found",
         });
       }
+      await sendAdminAccessWebhook({
+        email: ctx.session.user.email,
+        projectId,
+        orgId: dbProject.orgId,
+      });
       return next({
         ctx: {
           // infers the `session` as non-nullable
@@ -279,6 +322,14 @@ const enforceUserIsAuthedAndProjectMember = t.middleware(async (opts) => {
     throw new TRPCError({
       code: "UNAUTHORIZED",
       message: "User is not a member of this project",
+    });
+  }
+
+  if (ctx.session.user.admin === true) {
+    await sendAdminAccessWebhook({
+      email: ctx.session.user.email,
+      projectId,
+      orgId: sessionProject.organization.id,
     });
   }
 
@@ -337,6 +388,13 @@ const enforceIsAuthedAndOrgMember = t.middleware(async (opts) => {
     });
   }
 
+  if (ctx.session.user.admin === true) {
+    await sendAdminAccessWebhook({
+      email: ctx.session.user.email,
+      orgId,
+    });
+  }
+
   return next({
     ctx: {
       session: {
@@ -366,6 +424,7 @@ const inputTraceSchema = z.object({
   timestamp: z.date().nullish(),
   fromTimestamp: z.date().nullish(),
   truncated: z.boolean().default(false),
+  verbosity: z.enum(["compact", "truncated", "full"]).default("full"),
 });
 
 const enforceTraceAccess = t.middleware(async (opts) => {
@@ -385,25 +444,33 @@ const enforceTraceAccess = t.middleware(async (opts) => {
   const projectId = result.data.projectId;
   const timestamp = result.data.timestamp;
   const fromTimestamp = result.data.fromTimestamp;
+  const verbosity = result.data.verbosity;
 
-  const trace = await getTraceById({
+  const clickhouseTrace = await getTraceById({
     traceId,
     projectId,
     timestamp: timestamp ?? undefined,
     fromTimestamp: fromTimestamp ?? undefined,
     renderingProps: {
-      truncated: result.data.truncated,
+      truncated: verbosity === "truncated",
       shouldJsonParse: false, // we do not want to parse the input/output for tRPC
     },
+    clickhouseFeatureTag: "tracing-trpc",
   });
 
-  if (!trace) {
+  if (!clickhouseTrace) {
     logger.error(`Trace with id ${traceId} not found for project ${projectId}`);
     throw new TRPCError({
       code: "NOT_FOUND",
       message: "Trace not found",
     });
   }
+
+  const trace = {
+    ...clickhouseTrace,
+    input: parseIO(clickhouseTrace.input, verbosity),
+    output: parseIO(clickhouseTrace.output, verbosity),
+  };
 
   const sessionProject = ctx.session?.user?.organizations
     .flatMap((org) => org.projects)
@@ -438,6 +505,14 @@ const enforceTraceAccess = t.middleware(async (opts) => {
         "User is not a member of this project and this trace is not public",
     });
   }
+
+  if (ctx.session?.user?.admin === true) {
+    await sendAdminAccessWebhook({
+      email: ctx.session.user.email,
+      projectId,
+    });
+  }
+
   return next({
     ctx: {
       session: {
@@ -445,7 +520,7 @@ const enforceTraceAccess = t.middleware(async (opts) => {
         projectRole:
           ctx.session?.user?.admin === true ? Role.OWNER : sessionProject?.role,
       },
-      trace: trace, // pass the trace to the next middleware so we do not need to fetch it again
+      trace, // pass the trace to the next middleware so we do not need to fetch it again
     },
   });
 });
@@ -478,7 +553,7 @@ const enforceSessionAccess = t.middleware(async (opts) => {
   const { sessionId, projectId } = result.data;
 
   // trace sessions are stored in postgres. No need to check for clickhouse eligibility.
-  const session = await prisma.traceSession.findFirst({
+  const session = await ctx.prisma.traceSession.findFirst({
     where: {
       id: sessionId,
       projectId,
@@ -517,6 +592,13 @@ const enforceSessionAccess = t.middleware(async (opts) => {
     });
   }
 
+  if (ctx.session?.user?.admin === true) {
+    await sendAdminAccessWebhook({
+      email: ctx.session.user.email,
+      projectId,
+    });
+  }
+
   return next({
     ctx: {
       session: {
@@ -533,3 +615,73 @@ const enforceSessionAccess = t.middleware(async (opts) => {
 export const protectedGetSessionProcedure = withOtelTracingProcedure
   .use(withErrorHandling)
   .use(enforceSessionAccess);
+
+const inputAdminSchema = z.object({
+  adminApiKey: z.string(),
+});
+
+/** Reusable middleware that enforces admin API key authentication */
+const enforceAdminAuth = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+
+  const actualInput = await opts.getRawInput();
+  const result = inputAdminSchema.safeParse(actualInput);
+  if (!result.success) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Invalid input, adminApiKey is required",
+    });
+  }
+
+  const adminAuthResult = AdminApiAuthService.verifyAdminAuthFromAuthString(
+    result.data.adminApiKey,
+  );
+
+  if (!adminAuthResult.isAuthorized) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: adminAuthResult.error,
+    });
+  }
+
+  return next({
+    ctx,
+  });
+});
+
+/**
+ * Admin authenticated procedure
+ *
+ * This procedure requires a valid admin API key in the Authorization header.
+ * It should be used for sensitive operations that require admin-level access.
+ */
+export const adminProcedure = withOtelTracingProcedure
+  .use(withErrorHandling)
+  .use(enforceAdminAuth);
+
+// Export context types for easier reuse
+// Base context from createTRPCContext
+export type TRPCContext = Awaited<ReturnType<typeof createTRPCContext>>;
+// After `enforceUserIsAuthed`: session & user are non-null
+export type AuthedSession = NonNullable<TRPCContext["session"]> & {
+  user: NonNullable<NonNullable<TRPCContext["session"]>["user"]>;
+};
+export type AuthedContext = Omit<TRPCContext, "session"> & {
+  session: AuthedSession;
+};
+// After `enforceUserIsAuthedAndProjectMember`: extra fields guaranteed
+export type ProjectAuthedContext = Omit<TRPCContext, "session"> & {
+  session: AuthedSession & {
+    orgId: string;
+    orgRole: Role;
+    projectId: string;
+    projectRole: Role;
+  };
+};
+// After `enforceIsAuthedAndOrgMember`
+export type OrgAuthedContext = Omit<TRPCContext, "session"> & {
+  session: AuthedSession & {
+    orgId: string;
+    orgRole: Role;
+  };
+};

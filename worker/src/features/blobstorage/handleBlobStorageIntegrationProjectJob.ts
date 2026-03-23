@@ -11,6 +11,13 @@ import {
   getObservationsForBlobStorageExport,
   getTracesForBlobStorageExport,
   getScoresForBlobStorageExport,
+  getEventsForBlobStorageExport,
+  getCurrentSpan,
+  BlobStorageIntegrationProcessingQueue,
+  queryClickhouse,
+  QueueJobs,
+  sendBlobStorageExportFailedEmail,
+  getProjectAdminEmails,
 } from "@langfuse/shared/src/server";
 import {
   BlobStorageIntegrationType,
@@ -18,12 +25,15 @@ import {
   BlobStorageExportMode,
 } from "@langfuse/shared";
 import { decrypt } from "@langfuse/shared/encryption";
+import { randomUUID } from "crypto";
+import { env } from "../../env";
 
-const getMinTimestampForExport = (
+const getMinTimestampForExport = async (
+  projectId: string,
   lastSyncAt: Date | null,
   exportMode: BlobStorageExportMode,
   exportStartDate: Date | null,
-): Date => {
+): Promise<Date> => {
   // If we have a lastSyncAt, use it (this is for subsequent exports)
   if (lastSyncAt) {
     return lastSyncAt;
@@ -32,14 +42,83 @@ const getMinTimestampForExport = (
   // For first export, use the export mode to determine start date
   switch (exportMode) {
     case BlobStorageExportMode.FULL_HISTORY:
-      return new Date(0); // Export all historical data
+      // Query ClickHouse for the actual minimum timestamp from traces, observations, and scores tables
+      try {
+        const result = await queryClickhouse<{ min_timestamp: number | null }>({
+          query: `
+              SELECT min(toUnixTimestamp(ts)) * 1000 as min_timestamp
+              FROM (
+                SELECT min(timestamp) as ts
+                FROM traces
+                WHERE project_id = {projectId: String}
+
+                UNION ALL
+
+                SELECT min(start_time) as ts
+                FROM observations
+                WHERE project_id = {projectId: String}
+
+                UNION ALL
+
+                SELECT min(timestamp) as ts
+                FROM scores
+                WHERE project_id = {projectId: String}
+              )
+              WHERE ts > 0 -- Ignore 0 results (usually empty tables)
+            `,
+          params: { projectId },
+        });
+
+        // Extract the minimum timestamp
+        logger.info(
+          `[BLOB INTEGRATION] ClickHouse min_timestamp for project ${projectId}: ${result[0]?.min_timestamp}, type: ${typeof result[0]?.min_timestamp}`,
+        );
+        const minTimestampValue = Number(result[0]?.min_timestamp);
+
+        if (minTimestampValue && minTimestampValue > 0) {
+          const date = new Date(minTimestampValue);
+          logger.info(
+            `[BLOB INTEGRATION] Created Date from min_timestamp for project ${projectId}: ${date}, isValid: ${!isNaN(date.getTime())}, getTime: ${date.getTime()}`,
+          );
+          return date;
+        }
+
+        // If no data exists, use current time as a fallback
+        logger.info(
+          `[BLOB INTEGRATION] No historical data found for project ${projectId}, using current time`,
+        );
+        return new Date(0);
+      } catch (error) {
+        logger.error(
+          `[BLOB INTEGRATION] Error querying ClickHouse for minimum timestamp for project ${projectId}`,
+          error,
+        );
+        throw new Error(`Failed to fetch minimum timestamp: ${error}`);
+      }
     case BlobStorageExportMode.FROM_TODAY:
     case BlobStorageExportMode.FROM_CUSTOM_DATE:
       return exportStartDate || new Date(); // Use export start date or current time as fallback
     default:
-      // eslint-disable-next-line no-case-declarations, no-unused-vars
+      // eslint-disable-next-line no-case-declarations
       const _exhaustiveCheck: never = exportMode;
       throw new Error(`Invalid export mode: ${exportMode}`);
+  }
+};
+
+/**
+ * Get the frequency interval in milliseconds for a given export frequency.
+ * This is used to chunk historic exports into manageable time windows.
+ */
+const getFrequencyIntervalMs = (frequency: string): number => {
+  switch (frequency) {
+    case "hourly":
+      return 60 * 60 * 1000; // 1 hour
+    case "daily":
+      return 24 * 60 * 60 * 1000; // 1 day
+    case "weekly":
+      return 7 * 24 * 60 * 60 * 1000; // 1 week
+    default:
+      throw new Error(`Unsupported export frequency: ${frequency}`);
   }
 };
 
@@ -47,22 +126,22 @@ const getFileTypeProperties = (fileType: BlobStorageIntegrationFileType) => {
   switch (fileType) {
     case BlobStorageIntegrationFileType.JSON:
       return {
-        contentType: "application/json",
+        contentType: "application/json; charset=utf-8",
         extension: "json",
       };
     case BlobStorageIntegrationFileType.CSV:
       return {
-        contentType: "text/csv",
+        contentType: "text/csv; charset=utf-8",
         extension: "csv",
       };
     case BlobStorageIntegrationFileType.JSONL:
       return {
-        contentType: "application/x-ndjson",
+        contentType: "application/x-ndjson; charset=utf-8",
         extension: "jsonl",
       };
     default:
-      // eslint-disable-next-line no-case-declarations, no-unused-vars
-      const exhaustiveCheck: never = fileType;
+      // eslint-disable-next-line no-case-declarations
+      const _exhaustiveCheck: never = fileType;
       throw new Error(`Unsupported file type: ${fileType}`);
   }
 };
@@ -79,11 +158,11 @@ const processBlobStorageExport = async (config: {
   prefix?: string;
   forcePathStyle?: boolean;
   type: BlobStorageIntegrationType;
-  table: "traces" | "observations" | "scores";
+  table: "traces" | "observations" | "scores" | "observations_v2"; // observations_v2 is the events table
   fileType: BlobStorageIntegrationFileType;
 }) => {
   logger.info(
-    `Processing ${config.table} export for project ${config.projectId}`,
+    `[BLOB INTEGRATION] Processing ${config.table} export for project ${config.projectId}`,
   );
 
   // Initialize the storage service
@@ -135,6 +214,13 @@ const processBlobStorageExport = async (config: {
           config.maxTimestamp,
         );
         break;
+      case "observations_v2": // observations_v2 is the events table
+        dataStream = getEventsForBlobStorageExport(
+          config.projectId,
+          config.minTimestamp,
+          config.maxTimestamp,
+        );
+        break;
       default:
         throw new Error(`Unsupported table type: ${config.table}`);
     }
@@ -145,7 +231,7 @@ const processBlobStorageExport = async (config: {
       (err) => {
         if (err) {
           logger.error(
-            "Getting data from DB for blob storage integration failed: ",
+            "[BLOB INTEGRATION] Getting data from DB for blob storage integration failed: ",
             err,
           );
         }
@@ -153,19 +239,23 @@ const processBlobStorageExport = async (config: {
     );
 
     // Upload the file to cloud storage
-    await storageService.uploadFile({
+    // For CSV exports, use larger part size to handle big files
+    // 100 MB parts support files up to ~1 TB (100 MB × 10,000 AWS limit)
+    // This prevents hitting AWS's 10,000 part limit on large exports
+
+    await storageService.uploadFileBuffered({
       fileName: filePath,
       fileType: blobStorageProps.contentType,
       data: fileStream,
-      expiresInSeconds: 3600, // 1 hour expiry for the signed URL - is ignored
+      partSizeBytes: 100 * 1024 * 1024, // 100 MB part size
     });
 
     logger.info(
-      `Successfully exported ${config.table} records for project ${config.projectId}`,
+      `[BLOB INTEGRATION] Successfully exported ${config.table} records for project ${config.projectId}`,
     );
   } catch (error) {
     logger.error(
-      `Error exporting ${config.table} for project ${config.projectId}`,
+      `[BLOB INTEGRATION] Error exporting ${config.table} for project ${config.projectId}`,
       error,
     );
     throw error;
@@ -177,7 +267,15 @@ export const handleBlobStorageIntegrationProjectJob = async (
 ) => {
   const { projectId } = job.data.payload;
 
-  logger.info(`Processing blob storage integration for project ${projectId}`);
+  const span = getCurrentSpan();
+  if (span) {
+    span.setAttribute("messaging.bullmq.job.input.jobId", job.data.id);
+    span.setAttribute("messaging.bullmq.job.input.projectId", projectId);
+  }
+
+  logger.info(
+    `[BLOB INTEGRATION] Processing blob storage integration for project ${projectId}`,
+  );
 
   const blobStorageIntegration = await prisma.blobStorageIntegration.findUnique(
     {
@@ -188,23 +286,57 @@ export const handleBlobStorageIntegrationProjectJob = async (
   );
 
   if (!blobStorageIntegration) {
-    logger.warn(`Blob storage integration not found for project ${projectId}`);
+    logger.warn(
+      `[BLOB INTEGRATION] Blob storage integration not found for project ${projectId}`,
+    );
     return;
   }
   if (!blobStorageIntegration.enabled) {
     logger.info(
-      `Blob storage integration is disabled for project ${projectId}`,
+      `[BLOB INTEGRATION] Blob storage integration is disabled for project ${projectId}`,
     );
     return;
   }
 
   // Sync between lastSyncAt and now - 30 minutes
-  const minTimestamp = getMinTimestampForExport(
+  // Cap the export to one frequency period to enable chunked historic exports
+  const minTimestamp = await getMinTimestampForExport(
+    projectId,
     blobStorageIntegration.lastSyncAt,
     blobStorageIntegration.exportMode,
     blobStorageIntegration.exportStartDate,
   );
-  const maxTimestamp = new Date(new Date().getTime() - 30 * 60 * 1000);
+
+  logger.info(
+    `[BLOB INTEGRATION] Calculated minTimestamp for project ${projectId}: ${minTimestamp}, isValid: ${!isNaN(minTimestamp.getTime())}, getTime: ${minTimestamp.getTime()}, exportMode: ${blobStorageIntegration.exportMode}, lastSyncAt: ${blobStorageIntegration.lastSyncAt}, exportStartDate: ${blobStorageIntegration.exportStartDate}`,
+  );
+
+  const now = new Date();
+  const uncappedMaxTimestamp = new Date(now.getTime() - 30 * 60 * 1000); // 30-minute lag buffer
+  const frequencyIntervalMs = getFrequencyIntervalMs(
+    blobStorageIntegration.exportFrequency,
+  );
+
+  // Cap maxTimestamp to one frequency period ahead of minTimestamp
+  // This ensures large historic exports are broken into manageable chunks
+  const maxTimestamp = new Date(
+    Math.min(
+      minTimestamp.getTime() + frequencyIntervalMs,
+      uncappedMaxTimestamp.getTime(),
+    ),
+  );
+
+  logger.info(
+    `[BLOB INTEGRATION] Calculated maxTimestamp for project ${projectId}: ${maxTimestamp}, isValid: ${!isNaN(maxTimestamp.getTime())}, getTime: ${maxTimestamp.getTime()}, frequencyIntervalMs: ${frequencyIntervalMs}`,
+  );
+
+  // Skip export if the time window is empty or invalid
+  if (minTimestamp >= maxTimestamp) {
+    logger.info(
+      `[BLOB INTEGRATION] Skipping export for project ${projectId}: time window is empty (min: ${minTimestamp.toISOString()}, max: ${maxTimestamp.toISOString()})`,
+    );
+    return;
+  }
 
   try {
     // Process the export based on the integration configuration
@@ -225,27 +357,74 @@ export const handleBlobStorageIntegrationProjectJob = async (
       fileType: blobStorageIntegration.fileType,
     };
 
-    await Promise.all([
-      processBlobStorageExport({ ...executionConfig, table: "traces" }),
-      processBlobStorageExport({ ...executionConfig, table: "observations" }),
-      processBlobStorageExport({ ...executionConfig, table: "scores" }),
-    ]);
+    // Check if this project should only export traces (legacy behavior via env var)
+    const isTraceOnlyProject =
+      env.LANGFUSE_BLOB_STORAGE_EXPORT_TRACE_ONLY_PROJECT_IDS.includes(
+        projectId,
+      );
+
+    if (isTraceOnlyProject) {
+      // Only process traces table for projects in the trace-only list (legacy behavior)
+      logger.info(
+        `[BLOB INTEGRATION] Project ${projectId} is configured for trace-only export via env var, skipping observations, scores, and events`,
+      );
+      await processBlobStorageExport({ ...executionConfig, table: "traces" });
+    } else {
+      // Process tables based on exportSource setting
+      const processPromises: Promise<void>[] = [];
+
+      // Always include scores
+      processPromises.push(
+        processBlobStorageExport({ ...executionConfig, table: "scores" }),
+      );
+
+      // Traces and observations - for TRACES_OBSERVATIONS and TRACES_OBSERVATIONS_EVENTS
+      if (
+        blobStorageIntegration.exportSource === "TRACES_OBSERVATIONS" ||
+        blobStorageIntegration.exportSource === "TRACES_OBSERVATIONS_EVENTS"
+      ) {
+        processPromises.push(
+          processBlobStorageExport({ ...executionConfig, table: "traces" }),
+          processBlobStorageExport({
+            ...executionConfig,
+            table: "observations",
+          }),
+        );
+      }
+
+      // Events - for EVENTS and TRACES_OBSERVATIONS_EVENTS
+      // events are stored in the observations_v2 directory in blob storage
+      if (
+        blobStorageIntegration.exportSource === "EVENTS" ||
+        blobStorageIntegration.exportSource === "TRACES_OBSERVATIONS_EVENTS"
+      ) {
+        processPromises.push(
+          processBlobStorageExport({
+            ...executionConfig,
+            table: "observations_v2",
+          }),
+        );
+      }
+
+      await Promise.all(processPromises);
+    }
+
+    // Determine if we've caught up with present-day data
+    const caughtUp = maxTimestamp.getTime() >= uncappedMaxTimestamp.getTime();
 
     let nextSyncAt: Date;
-    switch (blobStorageIntegration.exportFrequency) {
-      case "hourly":
-        nextSyncAt = new Date(maxTimestamp.getTime() + 60 * 60 * 1000);
-        break;
-      case "daily":
-        nextSyncAt = new Date(maxTimestamp.getTime() + 24 * 60 * 60 * 1000);
-        break;
-      case "weekly":
-        nextSyncAt = new Date(maxTimestamp.getTime() + 7 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        throw new Error(
-          `Unsupported export frequency ${blobStorageIntegration.exportFrequency}`,
-        );
+    if (caughtUp) {
+      // Normal mode: schedule for the next frequency period
+      nextSyncAt = new Date(maxTimestamp.getTime() + frequencyIntervalMs);
+      logger.info(
+        `[BLOB INTEGRATION] Caught up with exports for project ${projectId}. Next sync at ${nextSyncAt.toISOString()}`,
+      );
+    } else {
+      // Catch-up mode: schedule next chunk immediately
+      nextSyncAt = new Date();
+      logger.info(
+        `[BLOB INTEGRATION] Still catching up for project ${projectId}. Scheduling next chunk immediately (processed up to ${maxTimestamp.toISOString()})`,
+      );
     }
 
     // Update integration after successful processing
@@ -256,17 +435,152 @@ export const handleBlobStorageIntegrationProjectJob = async (
       data: {
         lastSyncAt: maxTimestamp,
         nextSyncAt,
+        lastError: null,
+        lastErrorAt: null,
       },
     });
 
+    // If still catching up, immediately queue the next chunk job
+    if (!caughtUp) {
+      const queue = BlobStorageIntegrationProcessingQueue.getInstance();
+      if (queue) {
+        const jobId = `${projectId}-${maxTimestamp.toISOString()}`;
+        await queue.add(
+          QueueJobs.BlobStorageIntegrationProcessingJob,
+          {
+            id: randomUUID(),
+            name: QueueJobs.BlobStorageIntegrationProcessingJob,
+            timestamp: new Date(),
+            payload: { projectId },
+          },
+          { jobId, removeOnFail: true },
+        );
+        logger.info(
+          `[BLOB INTEGRATION] Queued next catch-up chunk for project ${projectId} with jobId ${jobId}`,
+        );
+      }
+    }
+
     logger.info(
-      `Successfully processed blob storage integration for project ${projectId}`,
+      `[BLOB INTEGRATION] Successfully processed blob storage integration for project ${projectId}`,
     );
   } catch (error) {
+    const errorMessage = extractStorageErrorMessage(error);
+
+    try {
+      await prisma.blobStorageIntegration.update({
+        where: { projectId },
+        data: {
+          lastError: errorMessage,
+          lastErrorAt: new Date(),
+        },
+      });
+    } catch (persistError) {
+      logger.error(
+        `[BLOB INTEGRATION] Failed to persist blob storage error for project ${projectId}`,
+        persistError,
+      );
+    }
+
+    notifyBlobStorageExportFailedInBackground(projectId);
+
     logger.error(
-      `Error processing blob storage integration for project ${projectId}`,
+      `[BLOB INTEGRATION] Error processing blob storage integration for project ${projectId}`,
       error,
     );
     throw error; // Rethrow to trigger retries
   }
 };
+
+function notifyBlobStorageExportFailedInBackground(projectId: string): void {
+  void (async () => {
+    try {
+      const cooldownMs =
+        env.LANGFUSE_BLOB_STORAGE_FAILURE_NOTIFICATION_COOLDOWN_HOURS *
+        60 *
+        60 *
+        1000;
+
+      // Atomic claim: set timestamp before sending to prevent duplicate emails on concurrent retries.
+      // If the email send subsequently fails, the cooldown still applies — the next failure
+      // after cooldown expiry will retry the notification.
+      const claimed = await prisma.blobStorageIntegration.updateMany({
+        where: {
+          projectId,
+          OR: [
+            { lastFailureNotificationSentAt: null },
+            {
+              lastFailureNotificationSentAt: {
+                lt: new Date(Date.now() - cooldownMs),
+              },
+            },
+          ],
+        },
+        data: { lastFailureNotificationSentAt: new Date() },
+      });
+
+      if (claimed.count === 0) {
+        logger.info(
+          `[BLOB INTEGRATION] Skipping failure notification for project ${projectId}, cooldown still active`,
+        );
+        return;
+      }
+
+      const emailEnv = {
+        EMAIL_FROM_ADDRESS: env.EMAIL_FROM_ADDRESS,
+        SMTP_CONNECTION_URL: env.SMTP_CONNECTION_URL,
+        NEXTAUTH_URL: env.NEXTAUTH_URL,
+        CLOUD_CRM_EMAIL: env.CLOUD_CRM_EMAIL,
+      };
+
+      if (
+        !emailEnv.EMAIL_FROM_ADDRESS ||
+        !emailEnv.SMTP_CONNECTION_URL ||
+        !emailEnv.NEXTAUTH_URL
+      ) {
+        return;
+      }
+
+      const [adminEmails, project] = await Promise.all([
+        getProjectAdminEmails(projectId),
+        prisma.project.findUnique({
+          where: { id: projectId },
+          select: { name: true },
+        }),
+      ]);
+
+      if (adminEmails.length === 0) {
+        return;
+      }
+
+      const projectName = project?.name ?? projectId;
+      const settingsUrl = `${emailEnv.NEXTAUTH_URL}/project/${projectId}/settings/integrations/blobstorage`;
+
+      await sendBlobStorageExportFailedEmail({
+        env: emailEnv,
+        projectName,
+        settingsUrl,
+        receiverEmails: adminEmails,
+      });
+    } catch (error) {
+      logger.error(
+        `[BLOB INTEGRATION] Failed to send failure notification for project ${projectId}`,
+        error,
+      );
+    }
+  })();
+}
+
+function extractStorageErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error).slice(0, 1000);
+
+  // handleStorageError wraps SDK errors via { cause: sdkError }
+  // Unwrap to get the raw SDK message (S3/Azure/GCS)
+  const cause = error.cause;
+  if (cause instanceof Error) {
+    return cause.message.slice(0, 1000);
+  }
+
+  // Fallback: ClickHouse errors or other non-wrapped errors
+  return error.message.slice(0, 1000);
+}

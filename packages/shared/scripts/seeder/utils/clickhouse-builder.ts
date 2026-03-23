@@ -193,7 +193,13 @@ export class ClickHouseQueryBuilder {
         start_time AS created_at,
         start_time AS updated_at,
         start_time AS event_ts,
-        0 AS is_deleted
+        0 AS is_deleted,
+        '' AS usage_pricing_tier_id,
+        '' AS usage_pricing_tier_name,
+        map() AS tool_definitions,
+        [] AS tool_calls,
+        [] AS tool_call_names
+
       FROM numbers(${totalObservations});
     `;
   }
@@ -247,7 +253,9 @@ export class ClickHouseQueryBuilder {
         timestamp AS created_at,
         timestamp AS updated_at,
         timestamp AS event_ts,
-        0 AS is_deleted
+        0 AS is_deleted,
+        NULL AS execution_trace_id,
+        '' AS long_string_value
       FROM numbers(${totalScores});
     `;
   }

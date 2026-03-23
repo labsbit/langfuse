@@ -19,11 +19,12 @@ services:
     # ports:
     #   - 127.0.0.1:3030:3030
     environment: &langfuse-worker-env
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       DATABASE_URL: ${DATABASE_URL} # DONE CHANGEME
       SALT: ${SALT} # DONE CHANGEME
       ENCRYPTION_KEY: ${ENCRYPTION_KEY} # DONE CHANGEME: generate via `openssl rand -hex 32`
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
-      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
       CLICKHOUSE_MIGRATION_URL: ${CLICKHOUSE_MIGRATION_URL:-clickhouse://clickhouse:9000}
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
@@ -73,8 +74,7 @@ services:
       - 3000:3000
     environment:
       <<: *langfuse-worker-env
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://langfuse.labsbit.dev}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret_d98fh298} # DONE CHANGEME
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET} # DONE CHANGEME
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
       LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
@@ -93,7 +93,7 @@ services:
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
-      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD} # DONE CHANGEME
     volumes:
       - langfuse_clickhouse_data:/var/lib/clickhouse
@@ -109,13 +109,13 @@ services:
       start_period: 1s
 
   minio:
-    image: docker.io/minio/minio
+    image: cgr.dev/chainguard/minio
     restart: always
     entrypoint: sh
     # create the 'langfuse' bucket before starting the service
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
-      MINIO_ROOT_USER: minio
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} # DONE CHANGEME
     # ports:
     #   - 9090:9000
@@ -135,8 +135,11 @@ services:
     # DONECHANGEME: row below to secure redis password
     command: >
       --requirepass ${REDIS_AUTH}
-    # ports: # These were already commented in the original file
+      --maxmemory-policy noeviction
+    # ports:
     #   - 127.0.0.1:6379:6379
+    volumes:
+      - langfuse_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -144,7 +147,7 @@ services:
       retries: 10
 
   postgres:
-    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    image: docker.io/postgres:${POSTGRES_VERSION:-17}
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -152,9 +155,11 @@ services:
       timeout: 3s
       retries: 10
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # DONE CHANGEME
-      POSTGRES_DB: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      TZ: UTC
+      PGTZ: UTC
     # ports:
     #   - 127.0.0.1:5432:5432
     volumes:
@@ -165,3 +170,6 @@ volumes:
   langfuse_clickhouse_data:
   langfuse_clickhouse_logs:
   langfuse_minio_data:
+    driver: local
+  langfuse_redis_data:
+    driver: local

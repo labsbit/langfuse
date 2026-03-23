@@ -1,8 +1,7 @@
 import {
   OpenAIContentSchema,
   type OpenAIOutputAudioType,
-} from "@/src/components/schemas/ChatMlSchema";
-import { StringOrMarkdownSchema } from "@/src/components/schemas/MarkdownSchema";
+} from "@langfuse/shared";
 import { Button } from "@/src/components/ui/button";
 import { PrettyJsonView } from "@/src/components/ui/PrettyJsonView";
 import { MarkdownView } from "@/src/components/ui/MarkdownViewer";
@@ -10,9 +9,11 @@ import { type MediaReturnType } from "@/src/features/media/validation";
 import { Check, Copy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type z } from "zod/v4";
+import { MARKDOWN_RENDER_CHARACTER_LIMIT } from "@/src/utils/constants";
 
 type MarkdownJsonViewHeaderProps = {
-  title: string;
+  title: string | React.ReactNode;
+  titleIcon?: React.ReactNode;
   handleOnValueChange: () => void;
   handleOnCopy: (event?: React.MouseEvent<HTMLButtonElement>) => void;
   canEnableMarkdown?: boolean;
@@ -21,6 +22,7 @@ type MarkdownJsonViewHeaderProps = {
 
 export function MarkdownJsonViewHeader({
   title,
+  titleIcon,
   handleOnValueChange: _handleOnValueChange,
   handleOnCopy,
   canEnableMarkdown: _canEnableMarkdown = true,
@@ -29,9 +31,12 @@ export function MarkdownJsonViewHeader({
   const [isCopied, setIsCopied] = useState(false);
 
   return (
-    <div className="flex flex-row items-center justify-between px-1 py-1 text-sm font-medium capitalize">
-      {title}
-      <div className="mr-1 flex min-w-0 flex-shrink flex-row items-center gap-1">
+    <div className="io-message-header group-hover:bg-muted/80 flex flex-row items-center justify-between px-1 py-1 text-sm font-medium capitalize transition-colors">
+      <div className="flex items-center gap-2">
+        {titleIcon}
+        {title}
+      </div>
+      <div className="mr-1 flex min-w-0 shrink flex-row items-center gap-1">
         {controlButtons}
         <Button
           title="Copy to clipboard"
@@ -43,7 +48,7 @@ export function MarkdownJsonViewHeader({
             handleOnCopy(event);
             setTimeout(() => setIsCopied(false), 1000);
           }}
-          className="-mr-2 hover:bg-border"
+          className="hover:bg-border -mr-2"
         >
           {isCopied ? (
             <Check className="h-3 w-3" />
@@ -59,29 +64,42 @@ export function MarkdownJsonViewHeader({
 const isSupportedMarkdownFormat = (
   content: unknown,
   contentValidation: z.ZodSafeParseResult<z.infer<typeof OpenAIContentSchema>>,
-): content is z.infer<typeof OpenAIContentSchema> => contentValidation.success;
+): content is z.infer<typeof OpenAIContentSchema> => {
+  if (!contentValidation.success) return false;
+
+  // Don't render if markdown content is huge
+  const contentSize = JSON.stringify(content || {}).length;
+  if (contentSize > MARKDOWN_RENDER_CHARACTER_LIMIT) {
+    return false;
+  }
+
+  return true;
+};
 
 // MarkdownJsonView will render markdown if `isMarkdownEnabled` (global context) is true and the content is valid markdown
 // otherwise, if content is valid markdown will render JSON with switch to enable markdown globally
 export function MarkdownJsonView({
   content,
   title,
+  titleIcon,
   className,
   customCodeHeaderClassName,
   audio,
   media,
+  controlButtons,
+  afterHeader,
 }: {
   content?: unknown;
   title?: string;
+  titleIcon?: React.ReactNode;
   className?: string;
   customCodeHeaderClassName?: string;
   audio?: OpenAIOutputAudioType;
   media?: MediaReturnType[];
+  controlButtons?: React.ReactNode;
+  /** Content to render between header and main content (e.g., thinking blocks) */
+  afterHeader?: React.ReactNode;
 }) {
-  const stringOrValidatedMarkdown = useMemo(
-    () => StringOrMarkdownSchema.safeParse(content),
-    [content],
-  );
   const validatedOpenAIContent = useMemo(
     () => OpenAIContentSchema.safeParse(content),
     [content],
@@ -96,19 +114,27 @@ export function MarkdownJsonView({
     <>
       {canEnableMarkdown ? (
         <MarkdownView
-          markdown={stringOrValidatedMarkdown.data ?? content}
+          markdown={
+            validatedOpenAIContent.success ? validatedOpenAIContent.data : null
+          }
           title={title}
+          titleIcon={titleIcon}
           customCodeHeaderClassName={customCodeHeaderClassName}
           audio={audio}
           media={media}
+          controlButtons={controlButtons}
+          afterHeader={afterHeader}
         />
       ) : (
         <PrettyJsonView
           json={content ?? (audio ? { audio } : null)}
           title={title}
+          titleIcon={titleIcon}
           className={className}
           media={media}
           currentView="pretty"
+          controlButtons={controlButtons}
+          afterHeader={afterHeader}
         />
       )}
     </>

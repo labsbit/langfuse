@@ -2,7 +2,9 @@ import { z } from "zod/v4";
 import { dashboardColumnDefinitions, singleFilter } from "@langfuse/shared";
 import { type views } from "@/src/features/query/types";
 
-const FilterArray = z.array(singleFilter);
+// Exported to silence @typescript-eslint/no-unused-vars v8 warning
+// (used for type extraction via typeof, which is a legitimate pattern)
+export const FilterArray = z.array(singleFilter);
 
 const viewMappings: Record<z.infer<typeof views>, Record<string, string>[]> = {
   traces: [
@@ -85,6 +87,14 @@ const viewMappings: Record<z.infer<typeof views>, Record<string, string>[]> = {
       viewName: "providedModelName",
     },
     {
+      uiTableName: "Level",
+      viewName: "level",
+    },
+    {
+      uiTableName: "Tool Names",
+      viewName: "toolNames",
+    },
+    {
       uiTableName: "Environment",
       viewName: "environment",
     },
@@ -108,6 +118,11 @@ const viewMappings: Record<z.infer<typeof views>, Record<string, string>[]> = {
     },
     {
       uiTableName: "Score Value",
+      viewName: "value",
+    },
+    {
+      // Legacy column name from dashboardColumnDefinitions (uiTableName: "value")
+      uiTableName: "value",
       viewName: "value",
     },
     {

@@ -11,9 +11,8 @@ export const generateDatasetItemId = (
   datasetName: string,
   itemIndex: number,
   projectId: string,
-  runNumber: number,
 ) => {
-  return `dataset-item-${datasetName}-${itemIndex}-${projectId.slice(-8)}-${runNumber}`;
+  return `dataset-item-${datasetName}-${itemIndex}-${projectId.slice(-8)}-0`;
 };
 
 export const generateDatasetRunTraceId = (
@@ -37,8 +36,10 @@ export const generateEvalObservationId = (
   evalTemplateId: string,
   index: number,
   projectId: string,
+  observationIndex?: number,
 ) => {
-  return `observation-eval-${evalTemplateId}-${projectId.slice(-8)}-${index}`;
+  const suffix = observationIndex != null ? `-${observationIndex}` : "";
+  return `observation-eval-${evalTemplateId}-${projectId.slice(-8)}-${index}${suffix}`;
 };
 
 export const generateEvalScoreId = (

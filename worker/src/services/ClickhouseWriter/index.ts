@@ -4,6 +4,7 @@ import {
   BlobStorageFileLogInsertType,
   getCurrentSpan,
   ObservationRecordInsertType,
+  ObservationBatchStagingRecordInsertType,
   recordGauge,
   recordHistogram,
   recordIncrement,
@@ -11,12 +12,12 @@ import {
   TraceRecordInsertType,
   TraceNullRecordInsertType,
   DatasetRunItemRecordInsertType,
+  EventRecordInsertType,
 } from "@langfuse/shared/src/server";
 
 import { env } from "../../env";
 import { logger } from "@langfuse/shared/src/server";
 import { instrumentAsync } from "@langfuse/shared/src/server";
-import { SpanKind } from "@opentelemetry/api";
 import { backOff } from "exponential-backoff";
 
 export class ClickhouseWriter {
@@ -42,8 +43,10 @@ export class ClickhouseWriter {
       [TableName.TracesNull]: [],
       [TableName.Scores]: [],
       [TableName.Observations]: [],
+      [TableName.ObservationsBatchStaging]: [],
       [TableName.BlobStorageFileLog]: [],
       [TableName.DatasetRunItems]: [],
+      [TableName.EventsFull]: [],
     };
 
     this.start();
@@ -100,7 +103,6 @@ export class ClickhouseWriter {
     return instrumentAsync(
       {
         name: "write-to-clickhouse",
-        spanKind: SpanKind.CONSUMER,
       },
       async () => {
         recordIncrement("langfuse.queue.clickhouse_writer.request");
@@ -109,8 +111,10 @@ export class ClickhouseWriter {
           this.flush(TableName.TracesNull, fullQueue),
           this.flush(TableName.Scores, fullQueue),
           this.flush(TableName.Observations, fullQueue),
+          this.flush(TableName.ObservationsBatchStaging, fullQueue),
           this.flush(TableName.BlobStorageFileLog, fullQueue),
           this.flush(TableName.DatasetRunItems, fullQueue),
+          this.flush(TableName.EventsFull, fullQueue),
         ]).catch((err) => {
           logger.error("ClickhouseWriter.flushAll", err);
         });
@@ -413,6 +417,7 @@ export class ClickhouseWriter {
       logger.error(`ClickhouseWriter.flush ${tableName}`, err);
 
       // Re-add the records to the queue with incremented attempts
+      let droppedCount = 0;
       queueItems.forEach((item) => {
         if (item.attempts < this.maxAttempts) {
           entityQueue.push({
@@ -422,12 +427,15 @@ export class ClickhouseWriter {
         } else {
           // TODO - Add to a dead letter queue in Redis rather than dropping
           recordIncrement("langfuse.queue.clickhouse_writer.error");
-          logger.error(
-            `Max attempts reached for ${tableName} record. Dropping record.`,
-            { item: this.truncateOversizedRecord(tableName, item.data) },
-          );
+          droppedCount++;
         }
       });
+
+      if (droppedCount > 0) {
+        logger.error(
+          `ClickhouseWriter: Max attempts reached, dropped ${droppedCount} ${tableName} record(s)`,
+        );
+      }
     }
   }
 
@@ -463,7 +471,15 @@ export class ClickhouseWriter {
         format: "JSONEachRow",
         values: params.records,
         clickhouse_settings: {
-          log_comment: JSON.stringify({ feature: "ingestion" }),
+          log_comment: JSON.stringify({
+            feature: "ingestion",
+            type: params.table,
+            operation_name: "writeToClickhouse",
+            projectId:
+              params.records.length > 0
+                ? params.records[0].project_id
+                : undefined,
+          }),
         },
       })
       .catch((err) => {
@@ -481,27 +497,33 @@ export class ClickhouseWriter {
 }
 
 export enum TableName {
-  Traces = "traces", // eslint-disable-line no-unused-vars
-  TracesNull = "traces_null", // eslint-disable-line no-unused-vars
-  Scores = "scores", // eslint-disable-line no-unused-vars
-  Observations = "observations", // eslint-disable-line no-unused-vars
-  BlobStorageFileLog = "blob_storage_file_log", // eslint-disable-line no-unused-vars
-  DatasetRunItems = "dataset_run_items_rmt", // eslint-disable-line no-unused-vars
+  Traces = "traces",
+  TracesNull = "traces_null",
+  Scores = "scores",
+  Observations = "observations",
+  ObservationsBatchStaging = "observations_batch_staging",
+  BlobStorageFileLog = "blob_storage_file_log",
+  DatasetRunItems = "dataset_run_items_rmt",
+  EventsFull = "events_full", // Primary write target - MV auto-populates events_core
 }
 
 type RecordInsertType<T extends TableName> = T extends TableName.Scores
   ? ScoreRecordInsertType
   : T extends TableName.Observations
     ? ObservationRecordInsertType
-    : T extends TableName.Traces
-      ? TraceRecordInsertType
-      : T extends TableName.TracesNull
-        ? TraceNullRecordInsertType
-        : T extends TableName.BlobStorageFileLog
-          ? BlobStorageFileLogInsertType
-          : T extends TableName.DatasetRunItems
-            ? DatasetRunItemRecordInsertType
-            : never;
+    : T extends TableName.ObservationsBatchStaging
+      ? ObservationBatchStagingRecordInsertType
+      : T extends TableName.Traces
+        ? TraceRecordInsertType
+        : T extends TableName.TracesNull
+          ? TraceNullRecordInsertType
+          : T extends TableName.BlobStorageFileLog
+            ? BlobStorageFileLogInsertType
+            : T extends TableName.DatasetRunItems
+              ? DatasetRunItemRecordInsertType
+              : T extends TableName.EventsFull
+                ? EventRecordInsertType
+                : never;
 
 type ClickhouseQueue = {
   [T in TableName]: ClickhouseWriterQueueItem<T>[];

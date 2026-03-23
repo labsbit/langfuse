@@ -28,10 +28,9 @@ import { Textarea } from "@/src/components/ui/textarea";
 import {
   type CreateQueueWithAssignments,
   CreateQueueWithAssignmentsData,
-  type ValidatedScoreConfig,
+  type ScoreConfigDomain,
 } from "@langfuse/shared";
 import { api } from "@/src/utils/api";
-import { getScoreDataTypeIcon } from "@/src/features/scores/components/ScoreDetailColumnHelpers";
 import { MultiSelectKeyValues } from "@/src/features/scores/components/multi-select-key-values";
 import { useRouter } from "next/router";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
@@ -47,6 +46,7 @@ import {
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { UserAssignmentSection } from "@/src/features/annotation-queues/components/UserAssignmentSection";
 import { showErrorToast } from "@/src/features/notifications/showErrorToast";
+import { getScoreDataTypeIcon } from "@/src/features/scores/lib/scoreColumns";
 
 export const CreateOrEditAnnotationQueueButton = ({
   projectId,
@@ -88,7 +88,7 @@ export const CreateOrEditAnnotationQueueButton = ({
         name: queueQuery.data.name,
         description: queueQuery.data.description || undefined,
         scoreConfigIds: queueQuery.data.scoreConfigs.map(
-          (config: ValidatedScoreConfig) => config.id,
+          (config: ScoreConfigDomain) => config.id,
         ),
         newAssignmentUserIds: [],
       });
@@ -186,7 +186,7 @@ export const CreateOrEditAnnotationQueueButton = ({
       setIsOpen(false);
 
       // capture posthog event
-    } catch (error) {
+    } catch {
       showErrorToast(
         "Operation failed",
         "Failed to create or update queue or assign users. Please try again.",
@@ -278,7 +278,7 @@ export const CreateOrEditAnnotationQueueButton = ({
                         <Textarea
                           {...field}
                           placeholder="Add description..."
-                          className="text-xs focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 active:ring-0"
+                          className="text-xs focus:ring-0 focus:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 active:ring-0"
                         />
                       </FormControl>
                       <FormMessage />
@@ -300,7 +300,7 @@ export const CreateOrEditAnnotationQueueButton = ({
                           placeholder="Value"
                           align="end"
                           variant="outline"
-                          className="grid grid-cols-[auto,1fr,auto,auto] gap-2"
+                          className="grid grid-cols-[auto_1fr_auto_auto] gap-2"
                           onValueChange={handleOnValueChange}
                           options={configs
                             .filter((config) => !config.isArchived)
@@ -368,9 +368,9 @@ export const CreateOrEditAnnotationQueueButton = ({
                             >
                               <div className="flex items-center gap-2">
                                 {isAdvancedOpen ? (
-                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  <ChevronDown className="text-muted-foreground h-4 w-4" />
                                 ) : (
-                                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                  <ChevronRight className="text-muted-foreground h-4 w-4" />
                                 )}
                                 <span className="text-sm font-medium">
                                   User Assignment
@@ -378,7 +378,7 @@ export const CreateOrEditAnnotationQueueButton = ({
                               </div>
                             </Button>
                           </CollapsibleTrigger>
-                          <CollapsibleContent className="border-t border-border/20 px-3 pb-3 pt-1">
+                          <CollapsibleContent className="border-border/20 border-t px-3 pt-1 pb-3">
                             {hasQueueAssignmentsReadAccess && (
                               <>
                                 <FormControl>

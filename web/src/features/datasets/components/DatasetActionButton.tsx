@@ -24,6 +24,7 @@ interface BaseDatasetButtonProps {
 
 interface CreateDatasetButtonProps extends BaseDatasetButtonProps {
   mode: "create";
+  folderPrefix?: string;
 }
 
 interface DeleteDatasetButtonProps extends BaseDatasetButtonProps {
@@ -38,6 +39,8 @@ interface UpdateDatasetButtonProps extends BaseDatasetButtonProps {
   datasetName: string;
   datasetDescription?: string;
   datasetMetadata?: Prisma.JsonValue;
+  datasetInputSchema?: Prisma.JsonValue;
+  datasetExpectedOutputSchema?: Prisma.JsonValue;
   icon?: boolean;
 }
 
@@ -64,7 +67,7 @@ export const DatasetActionButton = forwardRef<
           props.icon ? (
             <Button
               ref={ref}
-              variant={props.variant || "outline"}
+              variant={props.variant || "outline-solid"}
               size={props.size || "icon"}
               className={props.className}
               disabled={!hasAccess}
@@ -129,15 +132,15 @@ export const DatasetActionButton = forwardRef<
             variant={props.variant || "default"}
           >
             {hasAccess ? (
-              <PlusIcon className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
+              <PlusIcon className="mr-1.5 -ml-0.5 h-4 w-4" aria-hidden="true" />
             ) : (
-              <LockIcon className="-ml-0.5 mr-1.5 h-3 w-3" aria-hidden="true" />
+              <LockIcon className="mr-1.5 -ml-0.5 h-3 w-3" aria-hidden="true" />
             )}
             New dataset
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[90vh] sm:max-w-2xl md:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="mb-4">
             {props.mode === "create"
@@ -159,6 +162,7 @@ export const DatasetActionButton = forwardRef<
             mode="create"
             projectId={props.projectId}
             onFormSuccess={() => setOpen(false)}
+            folderPrefix={props.folderPrefix}
           />
         ) : props.mode === "delete" ? (
           <DatasetForm
@@ -177,6 +181,8 @@ export const DatasetActionButton = forwardRef<
             datasetName={props.datasetName}
             datasetDescription={props.datasetDescription}
             datasetMetadata={props.datasetMetadata}
+            datasetInputSchema={props.datasetInputSchema}
+            datasetExpectedOutputSchema={props.datasetExpectedOutputSchema}
           />
         )}
       </DialogContent>

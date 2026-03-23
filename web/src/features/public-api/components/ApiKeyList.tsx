@@ -28,13 +28,16 @@ import { DialogDescription } from "@radix-ui/react-dialog";
 import { TrashIcon } from "lucide-react";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { startCase } from "lodash";
+import startCase from "lodash/startCase";
+import { useLangfuseEnvCode } from "@/src/features/public-api/hooks/useLangfuseEnvCode";
 
 type ApiKeyScope = "project" | "organization";
 type ApiKeyEntity = { id: string; note: string | null };
 
 export function ApiKeyList(props: { entityId: string; scope: ApiKeyScope }) {
   const { entityId, scope } = props;
+  const envCode = useLangfuseEnvCode();
+
   if (!entityId) {
     throw new Error(
       `${scope}Id is required for ApiKeyList with scope ${scope}`,
@@ -80,7 +83,7 @@ export function ApiKeyList(props: { entityId: string; scope: ApiKeyScope }) {
   }
 
   return (
-    <div>
+    <div className="space-y-4">
       <Header
         title={startCase(`${scope} API keys`)}
         help={{
@@ -90,12 +93,14 @@ export function ApiKeyList(props: { entityId: string; scope: ApiKeyScope }) {
               ? "https://langfuse.com/docs/api#authentication"
               : "https://langfuse.com/docs/api#org-scoped-routes",
         }}
+        actionButtons={<CreateApiKeyButton entityId={entityId} scope={scope} />}
       />
+      <CodeView content={envCode} title=".env" />
       <Card className="mb-4 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="hidden text-primary md:table-cell">
+              <TableHead className="text-primary hidden md:table-cell">
                 Created
               </TableHead>
               <TableHead className="text-primary">Note</TableHead>
@@ -108,7 +113,7 @@ export function ApiKeyList(props: { entityId: string; scope: ApiKeyScope }) {
           <TableBody className="text-muted-foreground">
             {apiKeysQuery.data?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center">
+                <TableCell colSpan={5} className="text-center">
                   None
                 </TableCell>
               </TableRow>
@@ -153,7 +158,6 @@ export function ApiKeyList(props: { entityId: string; scope: ApiKeyScope }) {
           </TableBody>
         </Table>
       </Card>
-      <CreateApiKeyButton entityId={entityId} scope={scope} />
     </div>
   );
 }
@@ -324,7 +328,7 @@ function ApiKeyNote({
   return (
     <div
       onClick={() => setIsEditing(true)}
-      className="-mx-2 cursor-pointer rounded px-2 py-1 hover:bg-secondary/50"
+      className="hover:bg-secondary/50 -mx-2 cursor-pointer rounded px-2 py-1"
     >
       {note || "Click to add note"}
     </div>

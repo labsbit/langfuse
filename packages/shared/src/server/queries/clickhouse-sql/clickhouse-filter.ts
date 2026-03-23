@@ -22,6 +22,7 @@ export class StringFilter implements Filter {
   public value: string;
   public operator: (typeof filterOperators)["string"][number];
   public tablePrefix?: string;
+  public emptyEqualsNull?: boolean;
 
   constructor(opts: {
     clickhouseTable: string;
@@ -29,18 +30,38 @@ export class StringFilter implements Filter {
     operator: (typeof filterOperators)["string"][number];
     value: string;
     tablePrefix?: string;
+    emptyEqualsNull?: boolean;
   }) {
     this.clickhouseTable = opts.clickhouseTable;
     this.field = opts.field;
     this.value = opts.value;
     this.operator = opts.operator;
     this.tablePrefix = opts.tablePrefix;
+    this.emptyEqualsNull = opts.emptyEqualsNull;
   }
 
   apply(): ClickhouseFilter {
     const varName = `stringFilter${clickhouseCompliantRandomCharacters()}`;
 
     const fieldWithPrefix = `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field}`;
+
+    // '' ≡ NULL: when filtering with empty value, match both '' and NULL.
+    // ClickHouse functions like startsWith/endsWith/position return NULL (not true)
+    // for NULL inputs, so we need an explicit OR IS NULL guard.
+    if (this.emptyEqualsNull && this.value === "") {
+      if (
+        this.operator === "=" ||
+        this.operator === "contains" ||
+        this.operator === "starts with" ||
+        this.operator === "ends with"
+      ) {
+        return {
+          query: `(${fieldWithPrefix} = '' OR ${fieldWithPrefix} IS NULL)`,
+          params: {},
+        };
+      }
+    }
+
     let query: string;
     switch (this.operator) {
       case "=":
@@ -60,6 +81,11 @@ export class StringFilter implements Filter {
         break;
       default:
         throw new Error(`Unsupported operator: ${this.operator}`);
+    }
+
+    // '' ≡ NULL: "does not contain" would match '' — guard against it
+    if (this.emptyEqualsNull && this.operator === "does not contain") {
+      query = `(${fieldWithPrefix} != '' AND ${query})`;
     }
 
     return {
@@ -141,6 +167,7 @@ export class StringOptionsFilter implements Filter {
   public values: string[];
   public operator: (typeof filterOperators.stringOptions)[number];
   public tablePrefix?: string;
+  public emptyEqualsNull?: boolean;
 
   constructor(opts: {
     clickhouseTable: string;
@@ -148,22 +175,40 @@ export class StringOptionsFilter implements Filter {
     operator: (typeof filterOperators.stringOptions)[number];
     values: string[];
     tablePrefix?: string;
+    emptyEqualsNull?: boolean;
   }) {
     this.clickhouseTable = opts.clickhouseTable;
     this.field = opts.field;
     this.values = opts.values;
     this.operator = opts.operator;
     this.tablePrefix = opts.tablePrefix;
+    this.emptyEqualsNull = opts.emptyEqualsNull;
   }
 
   apply(): ClickhouseFilter {
     const uid = clickhouseCompliantRandomCharacters();
     const varName = `stringOptionsFilter${uid}`;
+    const fieldWithPrefix = `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field}`;
+    const hasEmpty = this.emptyEqualsNull && this.values.includes("");
+
+    let query =
+      this.operator === "any of"
+        ? `${fieldWithPrefix} IN ({${varName}: Array(String)})`
+        : `${fieldWithPrefix} NOT IN ({${varName}: Array(String)})`;
+
+    if (hasEmpty && this.operator === "any of") {
+      // '' ≡ NULL: also match NULL when '' is in the list
+      query = `(${query} OR ${fieldWithPrefix} IS NULL)`;
+    } else if (this.emptyEqualsNull && this.operator === "none of") {
+      // '' ≡ NULL: exclude empty/null (which are equivalent)
+      const guard = hasEmpty
+        ? `${fieldWithPrefix} IS NOT NULL`
+        : `${fieldWithPrefix} != ''`;
+      query = `(${query} AND ${guard})`;
+    }
+
     return {
-      query:
-        this.operator === "any of"
-          ? `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field} IN ({${varName}: Array(String)})`
-          : `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field} NOT IN ({${varName}: Array(String)})`,
+      query,
       params: { [varName]: this.values },
     };
   }
@@ -222,8 +267,10 @@ export class CategoryOptionsFilter implements Filter {
   }
 }
 
-// stringObject filter is used when we want to filter on a key value pair in a clickhouse map.
-// As we use the MAP form clickhouse, we can only filter efficiently on the first level of a json obj.
+// stringObject filter is used when we want to filter on a key value pair in metadata.
+// For observations/traces tables: uses Map column (metadata)
+// For events tables (events_core, events_full): uses Array columns (metadata_names/metadata_values)
+// We can only filter efficiently on the first level of a json obj.
 export class StringObjectFilter implements Filter {
   public clickhouseTable: string;
   public field: string;
@@ -251,28 +298,65 @@ export class StringObjectFilter implements Filter {
   apply(): ClickhouseFilter {
     const varKeyName = `stringObjectKeyFilter${clickhouseCompliantRandomCharacters()}`;
     const varValueName = `stringObjectValueFilter${clickhouseCompliantRandomCharacters()}`;
-    const column = `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field}`;
+    const prefix = this.tablePrefix ? this.tablePrefix + "." : "";
 
-    //  const query: `${column}['{varKeyName: String}'] ${this.operator} {${varValueName}: String}`,
+    // Events tables use array columns (metadata_names/metadata_values)
+    // Observations/traces tables use Map column (metadata)
+    const isEventsTable = [
+      "events_proto",
+      "events_core",
+      "events_full",
+    ].includes(this.clickhouseTable);
+
     let query: string;
-    switch (this.operator) {
-      case "=":
-        query = `${column}[{${varKeyName}: String}] = {${varValueName}: String}`;
-        break;
-      case "contains":
-        query = `position(${column}[{${varKeyName}: String}], {${varValueName}: String}) > 0`;
-        break;
-      case "does not contain":
-        query = `position(${column}[{${varKeyName}: String}], {${varValueName}: String}) = 0`;
-        break;
-      case "starts with":
-        query = `startsWith(${column}[{${varKeyName}: String}], {${varValueName}: String})`;
-        break;
-      case "ends with":
-        query = `endsWith(${column}[{${varKeyName}: String}], {${varValueName}: String})`;
-        break;
-      default:
-        throw new Error(`Unsupported operator: ${this.operator}`);
+    if (isEventsTable) {
+      // For events tables, use array access: metadata_values[indexOf(metadata_names, key)]
+      const namesColumn = `${prefix}metadata_names`;
+      const valuesColumn = `${prefix}metadata_values`;
+      const valueAccessor = `${valuesColumn}[indexOf(${namesColumn}, {${varKeyName}: String})]`;
+
+      switch (this.operator) {
+        case "=":
+          query = `${valueAccessor} = {${varValueName}: String}`;
+          break;
+        case "contains":
+          query = `position(${valueAccessor}, {${varValueName}: String}) > 0`;
+          break;
+        case "does not contain":
+          query = `position(${valueAccessor}, {${varValueName}: String}) = 0`;
+          break;
+        case "starts with":
+          query = `startsWith(${valueAccessor}, {${varValueName}: String})`;
+          break;
+        case "ends with":
+          query = `endsWith(${valueAccessor}, {${varValueName}: String})`;
+          break;
+        default:
+          throw new Error(`Unsupported operator: ${this.operator}`);
+      }
+    } else {
+      // For observations/traces tables, use Map access: metadata[key]
+      const column = `${prefix}${this.field}`;
+
+      switch (this.operator) {
+        case "=":
+          query = `${column}[{${varKeyName}: String}] = {${varValueName}: String}`;
+          break;
+        case "contains":
+          query = `position(${column}[{${varKeyName}: String}], {${varValueName}: String}) > 0`;
+          break;
+        case "does not contain":
+          query = `position(${column}[{${varKeyName}: String}], {${varValueName}: String}) = 0`;
+          break;
+        case "starts with":
+          query = `startsWith(${column}[{${varKeyName}: String}], {${varValueName}: String})`;
+          break;
+        case "ends with":
+          query = `endsWith(${column}[{${varKeyName}: String}], {${varValueName}: String})`;
+          break;
+        default:
+          throw new Error(`Unsupported operator: ${this.operator}`);
+      }
     }
 
     return {
@@ -335,22 +419,38 @@ export class NullFilter implements Filter {
   public field: string;
   public operator: (typeof filterOperators)["null"][number];
   public tablePrefix?: string;
+  public emptyEqualsNull?: boolean;
 
   constructor(opts: {
     clickhouseTable: string;
     field: string;
     operator: (typeof filterOperators)["null"][number];
     tablePrefix?: string;
+    emptyEqualsNull?: boolean;
   }) {
     this.clickhouseTable = opts.clickhouseTable;
     this.field = opts.field;
     this.operator = opts.operator;
     this.tablePrefix = opts.tablePrefix;
+    this.emptyEqualsNull = opts.emptyEqualsNull;
   }
 
   apply(): ClickhouseFilter {
+    const fieldWithPrefix = `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field}`;
+
+    // '' ≡ NULL: treat empty string and NULL as the same value
+    if (this.emptyEqualsNull) {
+      const isNull = this.operator === "is null";
+      return {
+        query: isNull
+          ? `(${fieldWithPrefix} = '' OR ${fieldWithPrefix} IS NULL)`
+          : `(${fieldWithPrefix} != '' AND ${fieldWithPrefix} IS NOT NULL)`,
+        params: {},
+      };
+    }
+
     return {
-      query: `${this.tablePrefix ? this.tablePrefix + "." : ""}${this.field} ${this.operator}`,
+      query: `${fieldWithPrefix} ${this.operator}`,
       params: {},
     };
   }
@@ -433,27 +533,22 @@ export class FilterList {
     this.filters.push(...filter);
   }
 
-  // eslint-disable-next-line no-unused-vars
   find(predicate: (filter: Filter) => boolean) {
     return this.filters.find(predicate);
   }
 
-  // eslint-disable-next-line no-unused-vars
   filter(predicate: (filter: Filter) => boolean) {
     return new FilterList(this.filters.filter(predicate));
   }
 
-  // eslint-disable-next-line no-unused-vars
   map(predicate: (filter: Filter) => Filter) {
     return new FilterList(this.filters.map(predicate));
   }
 
-  // eslint-disable-next-line no-unused-vars
   some(predicate: (filter: Filter) => boolean) {
     return this.filters.some(predicate);
   }
 
-  // eslint-disable-next-line no-unused-vars
   forEach(callback: (filter: Filter) => void) {
     this.filters.forEach(callback);
   }

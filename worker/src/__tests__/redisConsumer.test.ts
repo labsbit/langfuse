@@ -1,6 +1,7 @@
 import { expect, test, describe, vi, afterEach } from "vitest";
 import { randomUUID } from "crypto";
 import {
+  EvalExecutionQueue,
   QueueJobs,
   QueueName,
   TraceUpsertQueue,
@@ -40,10 +41,49 @@ describe.sequential("handle redis events", () => {
         expect(jobState).toEqual("completed");
       },
       {
-        timeout: 20_000,
+        timeout: 35_000,
       },
     );
-  }, 20_000);
+  }, 35_000);
+
+  test("handle sharded eval execution job succeeding", async () => {
+    const shardingKey = "project-id-job-execution-id";
+    const evalExecutionQueue = EvalExecutionQueue.getInstance({ shardingKey });
+    const shardNames = EvalExecutionQueue.getShardNames();
+
+    shardNames.forEach((shardName) => {
+      WorkerManager.register(shardName as QueueName, async () => true);
+    });
+
+    expect(evalExecutionQueue).toBeDefined();
+
+    const job = await evalExecutionQueue?.add(
+      QueueJobs.EvaluationExecution,
+      {
+        id: randomUUID(),
+        timestamp: new Date(),
+        payload: {
+          projectId: "project-id",
+          jobExecutionId: "job-execution-id",
+          delay: 0,
+        },
+        name: QueueJobs.EvaluationExecution,
+      },
+      {
+        removeOnComplete: false,
+      },
+    );
+
+    await vi.waitFor(
+      async () => {
+        const jobState = await evalExecutionQueue?.getJobState(job!.id!);
+        expect(jobState).toEqual("completed");
+      },
+      {
+        timeout: 35_000,
+      },
+    );
+  }, 35_000);
 
   test("handle no matching queue worker", async () => {
     // IngestionQueue worker vs TraceUpsert producer

@@ -1,6 +1,10 @@
 import { z } from "zod/v4";
 
-import { timeFilter, type ObservationOptions } from "@langfuse/shared";
+import {
+  ObservationType,
+  timeFilter,
+  type ObservationOptions,
+} from "@langfuse/shared";
 import { protectedProjectProcedure } from "@/src/server/api/trpc";
 import {
   getCategoricalScoresGroupedByName,
@@ -8,6 +12,8 @@ import {
   getObservationsGroupedByModelId,
   getObservationsGroupedByName,
   getObservationsGroupedByPromptName,
+  getObservationsGroupedByToolName,
+  getObservationsGroupedByCalledToolName,
   getNumericScoresGroupedByName,
   getTracesGroupedByName,
   getTracesGroupedByTags,
@@ -18,11 +24,25 @@ export const filterOptionsQuery = protectedProjectProcedure
   .input(
     z.object({
       projectId: z.string(),
-      startTimeFilter: timeFilter.optional(),
+      startTimeFilter: z.array(timeFilter).optional(),
+      observationType: z
+        .union([z.enum(ObservationType), z.literal("ALL")])
+        .default("GENERATION"),
     }),
   )
   .query(async ({ input }) => {
     const { startTimeFilter } = input;
+
+    // map startTimeFilter to Timestamp column for trace queries
+    const traceTimestampFilters =
+      startTimeFilter && startTimeFilter.length > 0
+        ? startTimeFilter.map((f) => ({
+            column: "Timestamp" as const,
+            operator: f.operator,
+            value: f.value,
+            type: "datetime" as const,
+          }))
+        : [];
 
     const getClickhouseTraceName = async (): Promise<
       Array<{ traceName: string }>
@@ -30,16 +50,7 @@ export const filterOptionsQuery = protectedProjectProcedure
       const traces = await getTracesGroupedByName(
         input.projectId,
         tracesTableUiColumnDefinitions,
-        startTimeFilter
-          ? [
-              {
-                column: "Timestamp",
-                operator: startTimeFilter.operator,
-                value: startTimeFilter.value,
-                type: "datetime",
-              },
-            ]
-          : [],
+        traceTimestampFilters,
       );
       return traces.map((i) => ({ traceName: i.name }));
     };
@@ -49,16 +60,7 @@ export const filterOptionsQuery = protectedProjectProcedure
     > => {
       const traces = await getTracesGroupedByTags({
         projectId: input.projectId,
-        filter: startTimeFilter
-          ? [
-              {
-                column: "Timestamp",
-                operator: startTimeFilter.operator,
-                value: startTimeFilter.value,
-                type: "datetime",
-              },
-            ]
-          : [],
+        filter: traceTimestampFilters,
       });
       return traces.map((i) => ({ tag: i.value }));
     };
@@ -72,58 +74,38 @@ export const filterOptionsQuery = protectedProjectProcedure
       traceNames,
       tags,
       modelId,
+      toolNames,
+      calledToolNames,
     ] = await Promise.all([
       // numeric scores
-      getNumericScoresGroupedByName(
-        input.projectId,
-        startTimeFilter
-          ? [
-              {
-                column: "Timestamp",
-                operator: startTimeFilter.operator,
-                value: startTimeFilter.value,
-                type: "datetime",
-              },
-            ]
-          : [],
-      ),
+      getNumericScoresGroupedByName(input.projectId, traceTimestampFilters),
       // categorical scores
-      getCategoricalScoresGroupedByName(
-        input.projectId,
-        startTimeFilter
-          ? [
-              {
-                column: "Timestamp",
-                operator: startTimeFilter.operator,
-                value: startTimeFilter.value,
-                type: "datetime",
-              },
-            ]
-          : [],
-      ),
+      getCategoricalScoresGroupedByName(input.projectId, traceTimestampFilters),
       //model
-      getObservationsGroupedByModel(
-        input.projectId,
-        startTimeFilter ? [startTimeFilter] : [],
-      ),
+      getObservationsGroupedByModel(input.projectId, startTimeFilter ?? []),
       //name
       getObservationsGroupedByName(
         input.projectId,
-        startTimeFilter ? [startTimeFilter] : [],
+        startTimeFilter ?? [],
+        input.observationType === "ALL" ? null : input.observationType,
       ),
       //prompt name
       getObservationsGroupedByPromptName(
         input.projectId,
-        startTimeFilter ? [startTimeFilter] : [],
+        startTimeFilter ?? [],
       ),
       //trace name
       getClickhouseTraceName(),
       // trace tags
       getClickhouseTraceTags(),
       // modelId
-      getObservationsGroupedByModelId(
+      getObservationsGroupedByModelId(input.projectId, startTimeFilter ?? []),
+      // available tool names (from tool_definitions)
+      getObservationsGroupedByToolName(input.projectId, startTimeFilter ?? []),
+      // called tool names (from tool_call_names)
+      getObservationsGroupedByCalledToolName(
         input.projectId,
-        startTimeFilter ? [startTimeFilter] : [],
+        startTimeFilter ?? [],
       ),
     ]);
 
@@ -157,6 +139,16 @@ export const filterOptionsQuery = protectedProjectProcedure
         .map((i) => ({
           value: i.tag as string,
         })),
+      toolNames: toolNames
+        .filter((i) => i.toolName !== null)
+        .map((i) => ({
+          value: i.toolName as string,
+        })),
+      calledToolNames: calledToolNames
+        .filter((i) => i.calledToolName !== null)
+        .map((i) => ({
+          value: i.calledToolName as string,
+        })),
       type: [
         "GENERATION",
         "SPAN",
@@ -171,6 +163,7 @@ export const filterOptionsQuery = protectedProjectProcedure
       ].map((i) => ({
         value: i,
       })),
+      environment: [], // Environment is fetched separately via api.projects.environmentFilterOptions
     };
 
     return res;

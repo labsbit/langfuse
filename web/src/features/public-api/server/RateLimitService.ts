@@ -15,6 +15,7 @@ import {
   createNewRedisInstance,
   redisQueueRetryOptions,
 } from "@langfuse/shared/src/server";
+import { env as sharedEnv } from "@langfuse/shared/src/env";
 import { type NextApiResponse } from "next";
 
 // Business Logic
@@ -32,6 +33,7 @@ export class RateLimitService {
       RateLimitService.redis =
         redis ??
         createNewRedisInstance({
+          keyPrefix: sharedEnv.REDIS_KEY_PREFIX ?? undefined, // For multi-tenant Redis isolation
           enableAutoPipelining: false, // This may help avoid https://github.com/redis/ioredis/issues/1931
           enableOfflineQueue: false,
           lazyConnect: true, // Connect when first command is sent
@@ -46,6 +48,8 @@ export class RateLimitService {
     if (RateLimitService.redis && RateLimitService.redis.status !== "end") {
       RateLimitService.redis.disconnect();
     }
+    RateLimitService.redis = null;
+    RateLimitService.instance = null;
   }
 
   async rateLimitRequest(
@@ -88,7 +92,7 @@ export class RateLimitService {
     if (RateLimitService?.redis?.status !== "ready") {
       try {
         await RateLimitService?.redis?.connect();
-      } catch (err) {
+      } catch (_err) {
         // Do nothing here. We will fail open if Redis is not available.
       }
     }
@@ -264,6 +268,12 @@ const getPlanBasedRateLimitConfig = (
             points: 10,
             durationInSec: 86400, // 10 requests per day
           };
+        case "trace-delete":
+          return {
+            resource: "trace-delete",
+            points: 50,
+            durationInSec: 86400, // 50 requests per day
+          };
         default:
           const exhaustiveCheck: never = resource;
           throw new Error(`Unhandled resource case: ${exhaustiveCheck}`);
@@ -320,6 +330,12 @@ const getPlanBasedRateLimitConfig = (
             points: 200, // temporary: using pro limit
             durationInSec: 86400, // 200 requests per day
           };
+        case "trace-delete":
+          return {
+            resource: "trace-delete",
+            points: 200,
+            durationInSec: 86400, // 200 requests per day
+          };
         default:
           const exhaustiveCheck: never = resource;
           throw new Error(`Unhandled resource case: ${exhaustiveCheck}`);
@@ -369,6 +385,12 @@ const getPlanBasedRateLimitConfig = (
             resource: "public-api-daily-metrics-legacy",
             points: 200,
             durationInSec: 86400, // 200 requests per day
+          };
+        case "trace-delete":
+          return {
+            resource: "trace-delete",
+            points: 1000,
+            durationInSec: 86400, // 1000 requests per day
           };
         default:
           const exhaustiveCheck: never = resource;

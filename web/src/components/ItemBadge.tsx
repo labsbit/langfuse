@@ -1,3 +1,4 @@
+import type React from "react";
 import { Badge } from "@/src/components/ui/badge";
 import {
   CircleDot,
@@ -70,7 +71,7 @@ const iconVariants = cva(cn("h-4 w-4"), {
       SPAN: "text-muted-blue",
       AGENT: "text-purple-600",
       TOOL: "text-orange-600",
-      CHAIN: "text-violet-600",
+      CHAIN: "text-pink-600",
       RETRIEVER: "text-teal-600",
       EMBEDDING: "text-amber-600",
       GUARDRAIL: "text-red-600",
@@ -87,6 +88,15 @@ const iconVariants = cva(cn("h-4 w-4"), {
     },
   },
 });
+
+export function renderFilterIcon(value: string): React.ReactNode {
+  const type = value as LangfuseItemType;
+  const Icon = iconMap[type];
+  if (!Icon) return null;
+  return (
+    <Icon className={cn("h-3.5 w-3.5 shrink-0", iconVariants({ type }))} />
+  );
+}
 
 export function ItemBadge({
   type,
@@ -116,7 +126,7 @@ export function ItemBadge({
       variant="outline"
       title={label}
       className={cn(
-        "flex max-w-fit items-center gap-1 overflow-hidden whitespace-nowrap border-2 bg-background px-1",
+        "bg-background flex max-w-fit items-center gap-1 overflow-hidden border-2 px-1 whitespace-nowrap",
         isSmall && "h-4",
       )}
     >

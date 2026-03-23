@@ -6,20 +6,23 @@ export const clickhouseSearchCondition = (
   query?: string,
   searchType?: TracingSearchType[],
   tablePrefix?: string,
-  useTracesAmtCompatMode: boolean = false,
+  searchColumns?: string[],
 ) => {
   const prefix = tablePrefix ? `${tablePrefix}.` : "";
+
+  const defaultCols = [`${prefix}id`, `t.user_id`, `${prefix}name`];
+  const cols = (searchColumns ?? defaultCols).map((col) =>
+    col.includes(".") ? col : `${prefix}${col}`,
+  );
 
   // We use a hard-coded prefix for user_id as it only occurs in the trace context.
   const conditions = [
     !searchType || searchType.includes("id")
-      ? `${prefix}id ILIKE {searchString: String} OR t.user_id ILIKE {searchString: String} OR ${prefix}name ILIKE {searchString: String}`
+      ? cols.map((col) => `${col} ILIKE {searchString: String}`).join(" OR ")
       : null,
-    searchType && searchType.includes("content") && !useTracesAmtCompatMode
+    searchType && searchType.includes("content")
       ? `${prefix}input ILIKE {searchString: String} OR ${prefix}output ILIKE {searchString: String}`
-      : searchType && searchType.includes("content") && useTracesAmtCompatMode
-        ? `finalizeAggregation(${prefix}input) ILIKE {searchString: String} OR finalizeAggregation(${prefix}output) ILIKE {searchString: String}`
-        : null,
+      : null,
   ].filter(Boolean);
 
   return {

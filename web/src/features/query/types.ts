@@ -20,6 +20,24 @@ export const viewDeclaration = z.object({
       description: z.string().optional(),
       type: z.string().optional(),
       unit: z.string().optional(),
+      aggregationFunction: z.string().optional(),
+      // Override for filter generation when the dimension uses complex SQL/aggregation.
+      // where: column expressions OR'd together for pre-aggregation row pruning.
+      // The exact match uses dimension.sql (the row-level expression).
+      filterSql: z
+        .object({
+          where: z.array(z.string()),
+        })
+        .optional(),
+      highCardinality: z.boolean().optional(),
+      uiHidden: z.boolean().optional(),
+      explodeArray: z.boolean().optional(),
+      pairExpand: z
+        .object({
+          valuesSql: z.string(),
+          valueAlias: z.string(),
+        })
+        .optional(),
     }),
   ),
   measures: z.record(
@@ -31,6 +49,11 @@ export const viewDeclaration = z.object({
       description: z.string().optional(),
       type: z.string().optional(),
       unit: z.string().optional(),
+      aggs: z.record(z.string(), z.string()).optional(),
+      // When set, the query builder will auto-include this dimension if it is absent.
+      // Used for pairExpand value-alias measures (e.g. costByType requires costType so
+      // the ARRAY JOIN is emitted and "cost_value" is in scope).
+      requiresDimension: z.string().optional(),
     }),
   ),
   tableRelations: z.record(
@@ -39,11 +62,22 @@ export const viewDeclaration = z.object({
       name: z.string(),
       joinConditionSql: z.string(),
       timeDimension: z.string(),
+      useFinal: z.boolean().optional(),
     }),
   ),
   // Segments are used to apply "constant" filters to the query. For example, if we only want one type of observations.
   segments: z.array(singleFilter),
   timeDimension: z.string(),
+  // When set, adds a subquery filter to restrict rows to those whose "root event"
+  // (matching the condition) has timeDimension in the query window.
+  rootEventCondition: z
+    .object({
+      // The column used to match root entities between outer query and subquery (e.g., "trace_id").
+      column: z.string(),
+      // SQL condition identifying root events (e.g., "parent_span_id = ''").
+      condition: z.string(),
+    })
+    .optional(),
 });
 
 export const stringDateTime = z.string().datetime({ offset: true });
@@ -56,6 +90,16 @@ export const views = z.enum([
   // "sessions",
   // "users",
 ]);
+
+// V2 views - excludes "traces" which is not supported in v2 API
+export const viewsV2 = z.enum([
+  "observations",
+  "scores-numeric",
+  "scores-categorical",
+]);
+
+export const viewVersions = z.enum(["v1", "v2"]);
+export type ViewVersion = z.infer<typeof viewVersions>;
 
 export const dimension = z.object({
   field: z.string(),
@@ -73,7 +117,26 @@ export const metricAggregations = z.enum([
   "p95",
   "p99",
   "histogram",
+  "uniq",
 ]);
+
+/**
+ * Returns the subset of aggregations that are valid for a given measure type.
+ * Whitelists known numeric types; unknown or missing types default to the
+ * restrictive count/uniq set to surface missing type annotations early.
+ */
+export function getValidAggregationsForMeasureType(
+  measureType: string | undefined,
+): z.infer<typeof metricAggregations>[] {
+  if (
+    measureType === "integer" ||
+    measureType === "decimal" ||
+    measureType === "number"
+  ) {
+    return [...metricAggregations.options];
+  }
+  return ["count", "uniq"];
+}
 
 export const metric = z.object({
   measure: z.string(),
@@ -128,3 +191,8 @@ export const query = z
       // Ensure fromTimestamp is before toTimestamp
       new Date(query.fromTimestamp) < new Date(query.toTimestamp),
   );
+
+export const useEventsTableSchema = z
+  .union([z.literal("true"), z.literal("false"), z.boolean()])
+  .optional()
+  .transform((val) => val === "true" || val === true);

@@ -1,5 +1,5 @@
 import { useRouter } from "next/router";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
   NumberParam,
   StringParam,
@@ -14,20 +14,21 @@ import { type LangfuseColumnDef } from "@/src/components/table/types";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { useQueryFilterState } from "@/src/features/filters/hooks/useFilterState";
 import { useDetailPageLists } from "@/src/features/navigate-detail-pages/context";
+import { useV4Beta } from "@/src/features/events/hooks/useV4Beta";
 import { api } from "@/src/utils/api";
 import { compactNumberFormatter, usdFormatter } from "@/src/utils/numbers";
 import { type RouterOutput } from "@/src/utils/types";
-import { type FilterState } from "@langfuse/shared";
-import { usersTableCols } from "@/src/server/api/definitions/usersTable";
+import { type FilterState, usersTableCols } from "@langfuse/shared";
 import { joinTableCoreAndMetrics } from "@/src/components/table/utils/joinTableCoreAndMetrics";
 import { useTableDateRange } from "@/src/hooks/useTableDateRange";
+import { toAbsoluteTimeRange } from "@/src/utils/date-range-utils";
 import { useDebounce } from "@/src/hooks/useDebounce";
 import Page from "@/src/components/layouts/page";
 import { UsersOnboarding } from "@/src/components/onboarding/UsersOnboarding";
 import {
   useEnvironmentFilter,
   convertSelectedEnvironmentsToFilter,
-} from "@/src/hooks/use-environment-filter";
+} from "@/src/hooks/useEnvironmentFilter";
 import { Badge } from "@/src/components/ui/badge";
 
 type RowData = {
@@ -43,12 +44,13 @@ type RowData = {
 export default function UsersPage() {
   const router = useRouter();
   const projectId = router.query.projectId as string;
+  const { isBetaEnabled } = useV4Beta();
 
   // Check if the user has any users
   const { data: hasAnyUser, isLoading } = api.users.hasAny.useQuery(
     { projectId },
     {
-      enabled: !!projectId,
+      enabled: !!projectId && !isBetaEnabled,
       trpc: {
         context: {
           skipBatch: true,
@@ -58,27 +60,61 @@ export default function UsersPage() {
     },
   );
 
-  const showOnboarding = !isLoading && !hasAnyUser;
+  const { data: hasAnyUserFromEvents, isLoading: isLoadingFromEvents } =
+    api.users.hasAnyFromEvents.useQuery(
+      { projectId },
+      {
+        enabled: !!projectId && isBetaEnabled,
+        trpc: {
+          context: {
+            skipBatch: true,
+          },
+        },
+        refetchInterval: 10_000,
+      },
+    );
+
+  const hasUsers = isBetaEnabled ? hasAnyUserFromEvents : hasAnyUser;
+  const isLoadingUsers = isBetaEnabled ? isLoadingFromEvents : isLoading;
+  const showOnboarding = !isLoadingUsers && !hasUsers;
 
   return (
     <Page
       headerProps={{
         title: "Users",
         help: {
-          description:
-            "Attribute data in Langfuse to a user by adding a userId to your traces. See docs to learn more.",
-          href: "https://langfuse.com/docs/user-explorer",
+          description: (
+            <>
+              Attribute data in Langfuse to a user by adding a userId to your
+              traces. See{" "}
+              <a
+                href="https://langfuse.com/docs/observability/features/users"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="decoration-primary/30 hover:decoration-primary underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                docs
+              </a>{" "}
+              to learn more.
+            </>
+          ),
+          href: "https://langfuse.com/docs/observability/features/users",
         },
       }}
       scrollable={showOnboarding}
     >
       {/* Show onboarding screen if user has no users */}
-      {showOnboarding ? <UsersOnboarding /> : <UsersTable />}
+      {showOnboarding ? (
+        <UsersOnboarding />
+      ) : (
+        <UsersTable isBetaEnabled={isBetaEnabled} />
+      )}
     </Page>
   );
 }
 
-const UsersTable = () => {
+const UsersTable = ({ isBetaEnabled }: { isBetaEnabled: boolean }) => {
   const router = useRouter();
   const projectId = router.query.projectId as string;
 
@@ -95,8 +131,12 @@ const UsersTable = () => {
     pageSize: withDefault(NumberParam, 50),
   });
 
-  const { selectedOption, dateRange, setDateRangeAndOption } =
-    useTableDateRange(projectId);
+  const { timeRange, setTimeRange } = useTableDateRange(projectId);
+
+  // Convert timeRange to absolute date range for compatibility
+  const dateRange = useMemo(() => {
+    return toAbsoluteTimeRange(timeRange) ?? undefined;
+  }, [timeRange]);
 
   const dateRangeFilter: FilterState = dateRange
     ? [
@@ -106,12 +146,21 @@ const UsersTable = () => {
           operator: ">=",
           value: dateRange.from,
         },
+        {
+          column: "Timestamp",
+          type: "datetime",
+          operator: "<=",
+          value: dateRange.to,
+        },
       ]
     : [];
 
   const environmentFilterOptions =
     api.projects.environmentFilterOptions.useQuery(
-      { projectId },
+      {
+        projectId,
+        fromTimestamp: dateRange?.from,
+      },
       {
         trpc: { context: { skipBatch: true } },
         refetchOnMount: false,
@@ -142,24 +191,25 @@ const UsersTable = () => {
     withDefault(StringParam, null),
   );
 
-  const users = api.users.all.useQuery({
-    filter: filterState,
-    page: paginationState.pageIndex,
-    limit: paginationState.pageSize,
-    projectId,
-    searchQuery: searchQuery ?? undefined,
-  });
+  const usersV3 = api.users.all.useQuery(
+    {
+      filter: filterState,
+      page: paginationState.pageIndex,
+      limit: paginationState.pageSize,
+      projectId,
+      searchQuery: searchQuery ?? undefined,
+    },
+    { enabled: !isBetaEnabled },
+  );
 
-  // this API call will return an empty array if there are no users.
-  // Hence, this adds one fast unnecessary API call if there are no users.
-  const userMetrics = api.users.metrics.useQuery(
+  const userMetricsV3 = api.users.metrics.useQuery(
     {
       projectId,
-      userIds: users.data?.users.map((u) => u.userId) ?? [],
+      userIds: usersV3.data?.users.map((u) => u.userId) ?? [],
       filter: filterState,
     },
     {
-      enabled: users.isSuccess,
+      enabled: usersV3.isSuccess && !isBetaEnabled,
       trpc: {
         context: {
           skipBatch: true,
@@ -167,6 +217,37 @@ const UsersTable = () => {
       },
     },
   );
+
+  const usersV4 = api.users.allFromEvents.useQuery(
+    {
+      filter: filterState,
+      page: paginationState.pageIndex,
+      limit: paginationState.pageSize,
+      projectId,
+      searchQuery: searchQuery ?? undefined,
+    },
+    { enabled: isBetaEnabled },
+  );
+
+  const userMetricsV4 = api.users.metricsFromEvents.useQuery(
+    {
+      projectId,
+      userIds: usersV4.data?.users.map((u) => u.userId) ?? [],
+      filter: filterState,
+    },
+    {
+      enabled: usersV4.isSuccess && isBetaEnabled,
+      trpc: {
+        context: {
+          skipBatch: true,
+        },
+      },
+    },
+  );
+
+  // Select the active query based on beta state
+  const users = isBetaEnabled ? usersV4 : usersV3;
+  const userMetrics = isBetaEnabled ? userMetricsV4 : userMetricsV3;
 
   type UserCoreOutput = RouterOutput["users"]["all"]["users"][number];
   type UserMetricsOutput = RouterOutput["users"]["metrics"][number];
@@ -252,9 +333,7 @@ const UsersTable = () => {
         if (!userMetrics.isSuccess) {
           return <Skeleton className="h-3 w-1/2" />;
         }
-        if (typeof value === "string") {
-          return <>{value}</>;
-        }
+        return typeof value === "string" ? value : undefined;
       },
     },
     {
@@ -269,9 +348,7 @@ const UsersTable = () => {
         if (!userMetrics.isSuccess) {
           return <Skeleton className="h-3 w-1/2" />;
         }
-        if (typeof value === "string") {
-          return <>{value}</>;
-        }
+        return typeof value === "string" ? value : undefined;
       },
     },
     {
@@ -288,9 +365,7 @@ const UsersTable = () => {
         if (!userMetrics.isSuccess) {
           return <Skeleton className="h-3 w-1/2" />;
         }
-        if (typeof value === "string") {
-          return <>{value}</>;
-        }
+        return typeof value === "string" ? value : undefined;
       },
     },
     {
@@ -307,9 +382,7 @@ const UsersTable = () => {
         if (!userMetrics.isSuccess) {
           return <Skeleton className="h-3 w-1/2" />;
         }
-        if (typeof value === "string") {
-          return <>{value}</>;
-        }
+        return typeof value === "string" ? value : undefined;
       },
     },
     {
@@ -325,9 +398,7 @@ const UsersTable = () => {
         if (!userMetrics.isSuccess) {
           return <Skeleton className="h-3 w-1/2" />;
         }
-        if (typeof value === "string") {
-          return <>{value}</>;
-        }
+        return typeof value === "string" ? value : undefined;
       },
     },
   ];
@@ -339,8 +410,8 @@ const UsersTable = () => {
         filterState={userFilterState}
         setFilterState={useDebounce(setUserFilterState)}
         columns={columns}
-        selectedOption={selectedOption}
-        setDateRangeAndOption={setDateRangeAndOption}
+        timeRange={timeRange}
+        setTimeRange={setTimeRange}
         searchConfig={{
           metadataSearchFields: ["User ID"],
           updateQuery: setSearchQuery,
@@ -379,8 +450,10 @@ const UsersTable = () => {
                       lastEvent:
                         t.lastTrace?.toLocaleString() ?? "No event yet",
                       totalEvents: compactNumberFormatter(
-                        Number(t.totalTraces ?? 0) +
-                          Number(t.totalObservations ?? 0),
+                        isBetaEnabled
+                          ? Number(t.totalObservations ?? 0)
+                          : Number(t.totalTraces ?? 0) +
+                              Number(t.totalObservations ?? 0),
                       ),
                       totalTokens: compactNumberFormatter(t.totalTokens ?? 0),
                       totalCost: usdFormatter(

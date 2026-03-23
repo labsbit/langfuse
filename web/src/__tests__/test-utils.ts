@@ -1,11 +1,15 @@
 import { env } from "@/src/env.mjs";
 import { prisma } from "@langfuse/shared/src/db";
 import {
-  clickhouseClient,
+  EvalExecutionQueue,
+  LLMAsJudgeExecutionQueue,
+  SecondaryEvalExecutionQueue,
+  SecondaryIngestionQueue,
   createBasicAuthHeader,
   getQueue,
   IngestionQueue,
   logger,
+  OtelIngestionQueue,
   QueueName,
   TraceUpsertQueue,
 } from "@langfuse/shared/src/server";
@@ -35,7 +39,7 @@ export const ensureTestDatabaseExists = async () => {
       stdio: "inherit",
     });
     console.log("Test database schema verified/updated");
-  } catch (error) {
+  } catch {
     console.log("Test database not accessible, creating...");
 
     const url = new URL(env.DATABASE_URL);
@@ -81,29 +85,15 @@ export const ensureTestDatabaseExists = async () => {
   // ClickHouse uses default database (no setup needed)
 };
 
-export const pruneDatabase = async () => {
-  if (!env.DATABASE_URL.includes("localhost:5432")) {
-    throw new Error("You cannot prune database unless running on localhost.");
-  }
-
-  await prisma.scoreConfig.deleteMany();
-  await prisma.traceSession.deleteMany();
-  await prisma.datasetItem.deleteMany();
-  await prisma.dataset.deleteMany();
-  await prisma.datasetRuns.deleteMany();
-  await prisma.prompt.deleteMany();
-  await prisma.promptDependency.deleteMany();
-  await prisma.model.deleteMany();
-  await prisma.llmApiKeys.deleteMany();
-  await prisma.comment.deleteMany();
-  await prisma.media.deleteMany();
-
-  await truncateClickhouseTables();
-};
 export const getQueues = () => {
   const queues: string[] = Object.values(QueueName);
   queues.push(
     ...IngestionQueue.getShardNames(),
+    ...SecondaryIngestionQueue.getShardNames(),
+    ...EvalExecutionQueue.getShardNames(),
+    ...SecondaryEvalExecutionQueue.getShardNames(),
+    ...LLMAsJudgeExecutionQueue.getShardNames(),
+    ...OtelIngestionQueue.getShardNames(),
     ...TraceUpsertQueue.getShardNames(),
   );
 
@@ -112,6 +102,7 @@ export const getQueues = () => {
     QueueName.BlobStorageIntegrationQueue,
     QueueName.DeadLetterRetryQueue,
     QueueName.PostHogIntegrationQueue,
+    QueueName.CloudFreeTierUsageThresholdQueue,
   ];
 
   return queues
@@ -121,14 +112,34 @@ export const getQueues = () => {
     .map((queueName) =>
       queueName.startsWith(QueueName.IngestionQueue)
         ? IngestionQueue.getInstance({ shardName: queueName })
-        : queueName.startsWith(QueueName.TraceUpsert)
-          ? TraceUpsertQueue.getInstance({ shardName: queueName })
-          : getQueue(
-              queueName as Exclude<
-                QueueName,
-                QueueName.IngestionQueue | QueueName.TraceUpsert
-              >,
-            ),
+        : queueName.startsWith(QueueName.IngestionSecondaryQueue)
+          ? SecondaryIngestionQueue.getInstance({ shardName: queueName })
+          : queueName.startsWith(QueueName.EvaluationExecution)
+            ? EvalExecutionQueue.getInstance({ shardName: queueName })
+            : queueName.startsWith(QueueName.EvaluationExecutionSecondaryQueue)
+              ? SecondaryEvalExecutionQueue.getInstance({
+                  shardName: queueName,
+                })
+              : queueName.startsWith(QueueName.LLMAsJudgeExecution)
+                ? LLMAsJudgeExecutionQueue.getInstance({
+                    shardName: queueName,
+                  })
+                : queueName.startsWith(QueueName.TraceUpsert)
+                  ? TraceUpsertQueue.getInstance({ shardName: queueName })
+                  : queueName.startsWith(QueueName.OtelIngestionQueue)
+                    ? OtelIngestionQueue.getInstance({ shardName: queueName })
+                    : getQueue(
+                        queueName as Exclude<
+                          QueueName,
+                          | QueueName.IngestionQueue
+                          | QueueName.IngestionSecondaryQueue
+                          | QueueName.EvaluationExecution
+                          | QueueName.EvaluationExecutionSecondaryQueue
+                          | QueueName.LLMAsJudgeExecution
+                          | QueueName.TraceUpsert
+                          | QueueName.OtelIngestionQueue
+                        >,
+                      ),
     );
 };
 
@@ -144,35 +155,6 @@ export const disconnectQueues = async () => {
       }
     }),
   );
-};
-
-export const truncateClickhouseTables = async () => {
-  if (!env.CLICKHOUSE_URL?.includes("localhost:8123")) {
-    throw new Error("You cannot prune clickhouse unless running on localhost.");
-  }
-
-  // Additional safety check for test database
-  if (env.CLICKHOUSE_DB === "test") {
-    console.log(
-      "Running tests against test ClickHouse database:",
-      env.CLICKHOUSE_DB,
-    );
-  } else if (env.CLICKHOUSE_DB !== "default") {
-    console.log(
-      "Running tests against ClickHouse database:",
-      env.CLICKHOUSE_DB,
-    );
-  }
-
-  await clickhouseClient().command({
-    query: "TRUNCATE TABLE IF EXISTS observations",
-  });
-  await clickhouseClient().command({
-    query: "TRUNCATE TABLE IF EXISTS scores",
-  });
-  await clickhouseClient().command({
-    query: "TRUNCATE TABLE IF EXISTS traces",
-  });
 };
 
 export type IngestionAPIResponse = {
@@ -197,6 +179,7 @@ export async function makeAPICall<T = IngestionAPIResponse>(
   url: string,
   body?: unknown,
   auth?: string,
+  customHeaders?: Record<string, string>,
 ): Promise<{ body: T; status: number }> {
   const finalUrl = `http://localhost:3000${url.startsWith("/") ? url : `/${url}`}`;
   const authorization =
@@ -207,11 +190,17 @@ export async function makeAPICall<T = IngestionAPIResponse>(
       Accept: "application/json",
       "Content-Type": "application/json;charset=UTF-8",
       Authorization: authorization,
+      ...customHeaders,
     },
     ...(method !== "GET" &&
       body !== undefined && { body: JSON.stringify(body) }),
   };
   const response = await fetch(finalUrl, options);
+
+  // Handle 204 No Content - no body to parse
+  if (response.status === 204) {
+    return { body: {} as T, status: response.status };
+  }
 
   // Clone the response before attempting to parse JSON
   const clonedResponse = response.clone();

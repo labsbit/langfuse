@@ -2,21 +2,15 @@ import {
   createObservation,
   createObservationsCh,
 } from "@langfuse/shared/src/server";
-import { pruneDatabase } from "@/src/__tests__/test-utils";
 import {
   getObservationMetricsForPrompts,
   getObservationsWithPromptName,
 } from "@langfuse/shared/src/server";
 import { v4 } from "uuid";
 
-const projectId = "7a88fb47-b4e2-43b8-a06c-a5ce950dc53a";
-
 describe("UI Prompts Table", () => {
-  beforeEach(async () => {
-    await pruneDatabase();
-  });
-
   it("should count the observations which belong to a prompt", async () => {
+    const projectId = v4();
     const observation = createObservation({
       id: v4(),
       project_id: projectId,
@@ -91,7 +85,80 @@ describe("UI Prompts Table", () => {
     );
   });
 
+  it("should count observations for foldered prompts with full path", async () => {
+    const projectId = v4();
+    const folderedObservation = createObservation({
+      id: v4(),
+      project_id: projectId,
+      trace_id: v4(),
+      prompt_id: v4(),
+      type: "GENERATION",
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      event_ts: Date.now(),
+      is_deleted: 0,
+      metadata: {},
+      start_time: Date.now(),
+      provided_usage_details: {},
+      provided_cost_details: {},
+      usage_details: { input: 100, output: 200 },
+      cost_details: { input: 100, output: 200 },
+      name: "Test Observation",
+      level: "WARNING",
+      input: "some llm input",
+      output: "some llm output",
+      version: "1.2.0",
+      parent_observation_id: null,
+      status_message: null,
+      provided_model_name: "anthropic",
+      internal_model_id: "some-model-id",
+      model_parameters: null,
+      total_cost: 100,
+      prompt_name: "folder1/my-prompt", // Full path with folder
+      prompt_version: 1,
+      end_time: Date.now(),
+      completion_start_time: Date.now(),
+    });
+
+    const secondFolderedObservation = {
+      ...folderedObservation,
+      id: v4(),
+      prompt_name: "folder1/my-prompt", // Same foldered prompt
+    };
+
+    const thirdFolderedObservation = {
+      ...folderedObservation,
+      id: v4(),
+      prompt_name: "folder2/another-prompt", // Different folder
+    };
+
+    await createObservationsCh([
+      folderedObservation,
+      secondFolderedObservation,
+      thirdFolderedObservation,
+    ]);
+
+    const result = await getObservationsWithPromptName(projectId, [
+      "folder1/my-prompt",
+      "folder2/another-prompt",
+    ]);
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        {
+          promptName: "folder1/my-prompt",
+          count: 2, // Should count both observations
+        },
+        {
+          promptName: "folder2/another-prompt",
+          count: 1,
+        },
+      ]),
+    );
+  });
+
   it("should correctly calculate prompt metrics", async () => {
+    const projectId = v4();
     const observation = createObservation({
       id: v4(),
       project_id: projectId,

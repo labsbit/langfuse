@@ -20,7 +20,7 @@ import {
 import Link from "next/link";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
 import { type CreateExperiment } from "@/src/features/experiments/types";
-import { PromptExperimentsForm } from "@/src/features/experiments/components/PromptExperimentsForm";
+import { MultiStepExperimentForm } from "@/src/features/experiments/components/MultiStepExperimentForm";
 import { RemoteExperimentUpsertForm } from "@/src/features/experiments/components/RemoteExperimentUpsertForm";
 import { RemoteExperimentTriggerModal } from "@/src/features/experiments/components/RemoteExperimentTriggerModal";
 import { Skeleton } from "@/src/components/ui/skeleton";
@@ -36,7 +36,7 @@ export const CreateExperimentsForm = ({
 }: {
   projectId: string;
   setFormOpen: (open: boolean) => void;
-  defaultValues?: Partial<CreateExperiment>;
+  defaultValues?: Partial<Pick<CreateExperiment, "promptId" | "datasetId">>;
   promptDefault?: {
     name: string;
     version: number;
@@ -98,10 +98,10 @@ export const CreateExperimentsForm = ({
     return (
       <>
         <DialogHeader>
-          <DialogTitle>Start Dataset Run</DialogTitle>
+          <DialogTitle>Run Experiment</DialogTitle>
           <DialogDescription>
-            Dataset runs allow to test iterations of your application or prompt
-            on a dataset. Learn more about dataset runs{" "}
+            Experiments allow you to test iterations of your application or
+            prompt on a dataset. Learn more about experiments{" "}
             <Link
               href="https://langfuse.com/docs/evaluation/dataset-runs/datasets"
               target="_blank"
@@ -121,11 +121,11 @@ export const CreateExperimentsForm = ({
                   via User Interface
                 </CardTitle>
                 <CardDescription>
-                  Test single prompts and model configurations via Langfuse UI
+                  Test single prompts and model configurations via Langfuse UI.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ul className="list-disc space-y-2 pl-4 text-sm text-muted-foreground">
+                <ul className="text-muted-foreground list-disc space-y-2 pl-4 text-sm">
                   <li>Compare prompt versions</li>
                   <li>Compare model configurations</li>
                   <li>No code required</li>
@@ -160,11 +160,12 @@ export const CreateExperimentsForm = ({
                   via SDK / API
                 </CardTitle>
                 <CardDescription>
-                  Start any dataset run via the Langfuse SDKs
+                  Start any dataset run via the Langfuse SDKs. To configure runs
+                  via webhook, use the button below.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ul className="list-disc space-y-2 pl-4 text-sm text-muted-foreground">
+                <ul className="text-muted-foreground list-disc space-y-2 pl-4 text-sm">
                   <li>Full control over dataset run execution</li>
                   <li>Custom evaluation logic</li>
                   <li>Integration with your codebase</li>
@@ -198,7 +199,7 @@ export const CreateExperimentsForm = ({
                   }
                 >
                   <Link
-                    href="https://langfuse.com/docs/evaluation/dataset-runs/datasets"
+                    href="https://langfuse.com/docs/evaluation/dataset-runs/remote-run"
                     target="_blank"
                   >
                     View Docs
@@ -208,7 +209,7 @@ export const CreateExperimentsForm = ({
                   <Button
                     variant="outline"
                     title="Set up remote dataset run in UI trigger"
-                    className="h-8 w-8 flex-shrink-0"
+                    className="h-8 w-8 shrink-0"
                     size="icon"
                     onClick={() => setShowRemoteExperimentUpsertForm(true)}
                   >
@@ -250,15 +251,13 @@ export const CreateExperimentsForm = ({
   }
 
   return (
-    <PromptExperimentsForm
+    <MultiStepExperimentForm
       projectId={projectId}
       setFormOpen={setFormOpen}
       defaultValues={defaultValues}
       promptDefault={promptDefault}
       handleExperimentSettled={handleExperimentSettled}
       handleExperimentSuccess={handleExperimentSuccess}
-      setShowPromptForm={setShowPromptForm}
-      showSDKRunInfoPage={showSDKRunInfoPage}
     />
   );
 };

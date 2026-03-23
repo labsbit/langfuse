@@ -1,15 +1,11 @@
 import { UiColumnMappings } from "../../tableDefinitions";
-import { env } from "../../env";
 
 export const tracesTableUiColumnDefinitions: UiColumnMappings = [
   {
     uiTableName: "⭐️",
     uiTableId: "bookmarked",
     clickhouseTableName: "traces",
-    clickhouseSelect:
-      env.LANGFUSE_EXPERIMENT_RETURN_NEW_RESULT === "true"
-        ? "finalizeAggregation(t.bookmarked)"
-        : "t.bookmarked",
+    clickhouseSelect: "t.bookmarked",
   },
   {
     uiTableName: "Level",
@@ -25,8 +21,24 @@ export const tracesTableUiColumnDefinitions: UiColumnMappings = [
     clickhouseSelect: "id",
   },
   {
+    uiTableName: "Trace ID",
+    uiTableId: "traceId",
+    clickhouseTableName: "traces",
+    clickhouseSelect: "id",
+  },
+  {
     uiTableName: "Name",
     uiTableId: "name",
+    clickhouseTableName: "traces",
+    clickhouseSelect: "name",
+    queryPrefix: "t",
+  },
+  {
+    // Alias for name - allows traceName filter (used in evals) to work on traces table
+    // this happens in the v4 beta if someone filters for traceName in beta mode and then switches back to non-beta
+    // TODO: remove after beta v4 is concluded
+    uiTableName: "Trace Name",
+    uiTableId: "traceName",
     clickhouseTableName: "traces",
     clickhouseSelect: "name",
     queryPrefix: "t",
@@ -157,13 +169,13 @@ export const tracesTableUiColumnDefinitions: UiColumnMappings = [
   },
   {
     uiTableName: "Scores (numeric)",
-    uiTableId: "scores",
+    uiTableId: "scores_avg",
     clickhouseTableName: "scores",
     clickhouseSelect: "s.scores_avg",
   },
   {
     uiTableName: "Scores (categorical)",
-    uiTableId: "scores",
+    uiTableId: "score_categories",
     clickhouseTableName: "scores",
     clickhouseSelect: "s.score_categories",
   },

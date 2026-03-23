@@ -38,6 +38,7 @@ import { useEvaluatorDefaults } from "@/src/features/experiments/hooks/useEvalua
 import { useExperimentEvaluatorData } from "@/src/features/experiments/hooks/useExperimentEvaluatorData";
 import { EvaluatorForm } from "@/src/features/evals/components/evaluator-form";
 import useLocalStorage from "@/src/components/useLocalStorage";
+import { createBreadcrumbItems } from "@/src/features/folders/utils";
 
 export default function Dataset() {
   const router = useRouter();
@@ -48,7 +49,7 @@ export default function Dataset() {
   const [isCreateExperimentDialogOpen, setIsCreateExperimentDialogOpen] =
     useState(false);
   const [selectedMetrics, setSelectedMetrics] = useLocalStorage<string[]>(
-    `${projectId}-dataset-chart-metrics`,
+    `${projectId}-${datasetId}-chart-metrics`,
     RESOURCE_METRICS.map((metric) => metric.key),
   );
 
@@ -85,10 +86,10 @@ export default function Dataset() {
     void utils.datasets.runsByDatasetId.invalidate();
     void utils.datasets.baseRunDataByDatasetId.invalidate();
     showSuccessToast({
-      title: "Dataset run triggered successfully",
-      description: "Waiting for dataset run to complete...",
+      title: "Experiment triggered successfully",
+      description: "Waiting for experiment to complete...",
       link: {
-        text: "View dataset run",
+        text: "View experiment",
         href: `/project/${projectId}/datasets/${data.datasetId}/compare?runs=${data.runId}`,
       },
     });
@@ -109,7 +110,7 @@ export default function Dataset() {
   });
 
   const evaluators = api.evals.jobConfigsByTarget.useQuery(
-    { projectId, targetObject: "dataset" },
+    { projectId, targetObject: ["dataset", "experiment"] },
     {
       enabled: hasEvalReadAccess && !!datasetId,
     },
@@ -119,7 +120,8 @@ export default function Dataset() {
 
   const {
     activeEvaluators,
-    inActiveEvaluators,
+    pausedEvaluators,
+    evaluatorTargetObjects,
     selectedEvaluatorData,
     showEvaluatorForm,
     handleConfigureEvaluator,
@@ -134,20 +136,14 @@ export default function Dataset() {
     refetchEvaluators: evaluators.refetch,
   });
 
-  // This function will be passed to the EvaluatorForm to modify form values before submission
-  const preprocessFormValues = useCallback((values: any) => {
-    // Ask the user if they want to run on historic data
-    const shouldRunOnHistoric = confirm(
-      "Do you also want to execute this evaluator on historic data? If not, click cancel.",
-    );
+  // Callback for preprocessing evaluator form values
+  // For experiment evaluators, we only run on new data (not historic)
+  const preprocessFormValues = useCallback((values: any) => values, []);
 
-    // If the user confirms, include EXISTING in the timeScope
-    if (shouldRunOnHistoric && !values.timeScope.includes("EXISTING")) {
-      values.timeScope = [...values.timeScope, "EXISTING"];
-    }
-
-    return values;
-  }, []);
+  const datasetName = dataset.data?.name ?? "";
+  const segments = datasetName.split("/").filter((s) => s.trim());
+  const folderPath = segments.length > 1 ? segments.slice(0, -1).join("/") : "";
+  const breadcrumbItems = folderPath ? createBreadcrumbItems(folderPath) : [];
 
   return (
     <Page
@@ -156,6 +152,10 @@ export default function Dataset() {
         itemType: "DATASET",
         breadcrumb: [
           { name: "Datasets", href: `/project/${projectId}/datasets` },
+          ...breadcrumbItems.map((item) => ({
+            name: item.name,
+            href: `/project/${projectId}/datasets?folder=${encodeURIComponent(item.folderPath)}`,
+          })),
         ],
         help: dataset.data?.description
           ? {
@@ -178,10 +178,10 @@ export default function Dataset() {
                   onClick={() => capture("dataset_run:new_form_open")}
                 >
                   <FlaskConical className="h-4 w-4" />
-                  <span className="ml-2 hidden md:block">New dataset run</span>
+                  <span className="ml-2 hidden md:block">Run experiment</span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
+              <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
                 <CreateExperimentsForm
                   key={`create-experiment-form-${datasetId}`}
                   projectId={projectId as string}
@@ -204,7 +204,8 @@ export default function Dataset() {
                   onConfigureTemplate={handleConfigureEvaluator}
                   onSelectEvaluator={handleSelectEvaluator}
                   activeTemplateIds={activeEvaluators}
-                  inactiveTemplateIds={inActiveEvaluators}
+                  inactiveTemplateIds={pausedEvaluators}
+                  evaluatorTargetObjects={evaluatorTargetObjects}
                   disabled={!hasEvalWriteAccess}
                 />
               </div>
@@ -229,7 +230,7 @@ export default function Dataset() {
                   <MoreVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="flex flex-col [&>*]:w-full [&>*]:justify-start">
+              <DropdownMenuContent className="flex flex-col *:w-full *:justify-start">
                 <DropdownMenuItem asChild>
                   <DatasetActionButton
                     mode="update"
@@ -238,6 +239,10 @@ export default function Dataset() {
                     datasetName={dataset.data?.name ?? ""}
                     datasetDescription={dataset.data?.description ?? undefined}
                     datasetMetadata={dataset.data?.metadata}
+                    datasetInputSchema={dataset.data?.inputSchema ?? undefined}
+                    datasetExpectedOutputSchema={
+                      dataset.data?.expectedOutputSchema ?? undefined
+                    }
                   />
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
@@ -263,7 +268,7 @@ export default function Dataset() {
                 {hasReadAccess && (
                   <DropdownMenuItem asChild>
                     <Link href={`/project/${projectId}/evals?target=dataset`}>
-                      <Bot className="ml-1 mr-2 h-4 w-4" />
+                      <Bot className="mr-2 ml-1 h-4 w-4" />
                       Manage Evaluators
                     </Link>
                   </DropdownMenuItem>
@@ -290,7 +295,7 @@ export default function Dataset() {
             }
           }}
         >
-          <DialogContent className="max-h-[90vh] max-w-screen-md overflow-y-auto">
+          <DialogContent className="max-h-[90vh] max-w-(--breakpoint-md) overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {selectedEvaluatorData.evaluator.id ? "Edit" : "Configure"}{" "}

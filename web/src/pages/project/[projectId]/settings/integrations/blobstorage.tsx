@@ -21,16 +21,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/src/components/ui/select";
-import { env } from "@/src/env.mjs";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/src/components/ui/tooltip";
 import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
 import {
   blobStorageIntegrationFormSchema,
   type BlobStorageIntegrationFormSchema,
+  type BlobStorageSyncStatus,
 } from "@/src/features/blobstorage-integration/types";
+import { deriveSyncStatus } from "@/src/features/blobstorage-integration/deriveSyncStatus";
+import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { api } from "@/src/utils/api";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Card } from "@tremor/react";
+import { Card } from "@/src/components/ui/card";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
@@ -41,8 +48,13 @@ import {
   BlobStorageIntegrationType,
   BlobStorageIntegrationFileType,
   BlobStorageExportMode,
+  AnalyticsIntegrationExportSource,
   type BlobStorageIntegration,
+  EXPORT_SOURCE_OPTIONS,
 } from "@langfuse/shared";
+import { useLangfuseCloudRegion } from "@/src/features/organizations/hooks";
+import { useV4Beta } from "@/src/features/events/hooks/useV4Beta";
+import { Info, ExternalLink } from "lucide-react";
 
 export default function BlobStorageIntegrationSettings() {
   const router = useRouter();
@@ -62,12 +74,27 @@ export default function BlobStorageIntegrationSettings() {
     },
   );
 
-  const status =
-    state.isInitialLoading || !hasAccess
+  const syncStatus =
+    state.isInitialLoading || !hasAccess || !state.data
       ? undefined
-      : state.data?.enabled
-        ? "active"
-        : "inactive";
+      : deriveSyncStatus({
+          enabled: state.data.enabled,
+          lastError: state.data.lastError,
+          lastSyncAt: state.data.lastSyncAt
+            ? new Date(state.data.lastSyncAt)
+            : null,
+          nextSyncAt: state.data.nextSyncAt
+            ? new Date(state.data.nextSyncAt)
+            : null,
+        });
+
+  const syncStatusToBadge: Record<BlobStorageSyncStatus, string> = {
+    up_to_date: "active",
+    queued: "queued",
+    idle: "inactive",
+    disabled: "disabled",
+    error: "error",
+  };
 
   return (
     <ContainerPage
@@ -76,11 +103,15 @@ export default function BlobStorageIntegrationSettings() {
         breadcrumb: [
           { name: "Settings", href: `/project/${projectId}/settings` },
         ],
-        actionButtonsLeft: <>{status && <StatusBadge type={status} />}</>,
+        actionButtonsLeft: (
+          <>
+            {syncStatus && <StatusBadge type={syncStatusToBadge[syncStatus]} />}
+          </>
+        ),
         actionButtonsRight: (
           <Button asChild variant="secondary">
             <Link
-              href="https://langfuse.com/docs/query-traces#blob-storage"
+              href="https://langfuse.com/docs/api-and-data-platform/features/export-to-blob-storage"
               target="_blank"
             >
               Integration Docs ↗
@@ -89,7 +120,7 @@ export default function BlobStorageIntegrationSettings() {
         ),
       }}
     >
-      <p className="mb-4 text-sm text-primary">
+      <p className="text-primary mb-4 text-sm">
         Configure scheduled exports of your trace data to AWS S3, S3-compatible
         storages, or Azure Blob Storage. Set up a hourly, daily, or weekly
         export to your own storage for data analysis or backup purposes. Use the
@@ -103,9 +134,76 @@ export default function BlobStorageIntegrationSettings() {
           reach out to your project admin or owner.
         </p>
       )}
+      {state.data && (
+        <>
+          <Header title="Status" />
+          {state.data.lastError && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertTitle>Last export failed</AlertTitle>
+              <AlertDescription>
+                {state.data.lastError}
+                {state.data.lastErrorAt && (
+                  <>
+                    <br />
+                    <span className="text-xs opacity-70">
+                      {new Date(state.data.lastErrorAt).toLocaleString()}
+                    </span>
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+          <Card className="p-3">
+            <div className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-sm">
+              <span className="text-muted-foreground">Data exported up to</span>
+              <span>
+                {state.data.lastSyncAt
+                  ? new Date(state.data.lastSyncAt).toLocaleString()
+                  : "Never (pending)"}
+              </span>
+              {state.data.nextSyncAt && (
+                <>
+                  <span className="text-muted-foreground">
+                    Next export scheduled
+                  </span>
+                  <span>
+                    {new Date(state.data.nextSyncAt).toLocaleString()}
+                  </span>
+                </>
+              )}
+              <span className="text-muted-foreground">Export mode</span>
+              <span>
+                {state.data.exportMode === BlobStorageExportMode.FULL_HISTORY
+                  ? "Full history"
+                  : state.data.exportMode === BlobStorageExportMode.FROM_TODAY
+                    ? "From setup date"
+                    : state.data.exportMode ===
+                        BlobStorageExportMode.FROM_CUSTOM_DATE
+                      ? "From custom date"
+                      : "Unknown"}
+              </span>
+              {(state.data.exportMode ===
+                BlobStorageExportMode.FROM_CUSTOM_DATE ||
+                state.data.exportMode === BlobStorageExportMode.FROM_TODAY) &&
+                state.data.exportStartDate && (
+                  <>
+                    <span className="text-muted-foreground">
+                      Export start date
+                    </span>
+                    <span>
+                      {new Date(
+                        state.data.exportStartDate,
+                      ).toLocaleDateString()}
+                    </span>
+                  </>
+                )}
+            </div>
+          </Card>
+        </>
+      )}
       {hasAccess && (
         <>
-          <Header title="Configuration" />
+          <Header title="Configuration" className="mt-8" />
           <Card className="p-3">
             <BlobStorageIntegrationSettingsForm
               state={state.data || undefined}
@@ -113,39 +211,6 @@ export default function BlobStorageIntegrationSettings() {
               isLoading={state.isLoading}
             />
           </Card>
-        </>
-      )}
-      {state.data?.enabled && (
-        <>
-          <Header title="Status" className="mt-8" />
-          <div className="space-y-2">
-            <p className="text-sm text-primary">
-              Data last exported:{" "}
-              {state.data?.lastSyncAt
-                ? new Date(state.data.lastSyncAt).toLocaleString()
-                : "Never (pending)"}
-            </p>
-            <p className="text-sm text-primary">
-              Export mode:{" "}
-              {state.data?.exportMode === BlobStorageExportMode.FULL_HISTORY
-                ? "Full history"
-                : state.data?.exportMode === BlobStorageExportMode.FROM_TODAY
-                  ? "From setup date"
-                  : state.data?.exportMode ===
-                      BlobStorageExportMode.FROM_CUSTOM_DATE
-                    ? "From custom date"
-                    : "Unknown"}
-            </p>
-            {(state.data?.exportMode ===
-              BlobStorageExportMode.FROM_CUSTOM_DATE ||
-              state.data?.exportMode === BlobStorageExportMode.FROM_TODAY) &&
-              state.data?.exportStartDate && (
-                <p className="text-sm text-primary">
-                  Export start date:{" "}
-                  {new Date(state.data.exportStartDate).toLocaleDateString()}
-                </p>
-              )}
-          </div>
         </>
       )}
     </ContainerPage>
@@ -162,11 +227,13 @@ const BlobStorageIntegrationSettingsForm = ({
   isLoading: boolean;
 }) => {
   const capture = usePostHogClientCapture();
+  const { isLangfuseCloud } = useLangfuseCloudRegion();
+  const { isBetaEnabled } = useV4Beta();
   const [integrationType, setIntegrationType] =
     useState<BlobStorageIntegrationType>(BlobStorageIntegrationType.S3);
 
   // Check if this is a self-hosted instance (no cloud region set)
-  const isSelfHosted = !env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION;
+  const isSelfHosted = !isLangfuseCloud;
 
   const blobStorageForm = useForm({
     resolver: zodResolver(blobStorageIntegrationFormSchema),
@@ -187,6 +254,11 @@ const BlobStorageIntegrationSettingsForm = ({
       fileType: state?.fileType || BlobStorageIntegrationFileType.JSONL,
       exportMode: state?.exportMode || BlobStorageExportMode.FULL_HISTORY,
       exportStartDate: state?.exportStartDate || null,
+      exportSource:
+        state?.exportSource ||
+        (isBetaEnabled
+          ? AnalyticsIntegrationExportSource.EVENTS
+          : AnalyticsIntegrationExportSource.TRACES_OBSERVATIONS),
     },
     disabled: isLoading,
   });
@@ -197,7 +269,7 @@ const BlobStorageIntegrationSettingsForm = ({
       type: state?.type || BlobStorageIntegrationType.S3,
       bucketName: state?.bucketName || "",
       endpoint: state?.endpoint || null,
-      region: state?.region || "",
+      region: state?.region || "auto",
       accessKeyId: state?.accessKeyId || "",
       secretAccessKey: state?.secretAccessKey || null,
       prefix: state?.prefix || "",
@@ -210,6 +282,11 @@ const BlobStorageIntegrationSettingsForm = ({
       fileType: state?.fileType || BlobStorageIntegrationFileType.JSONL,
       exportMode: state?.exportMode || BlobStorageExportMode.FULL_HISTORY,
       exportStartDate: state?.exportStartDate || null,
+      exportSource:
+        state?.exportSource ||
+        (isBetaEnabled
+          ? AnalyticsIntegrationExportSource.EVENTS
+          : AnalyticsIntegrationExportSource.TRACES_OBSERVATIONS),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
@@ -259,7 +336,6 @@ const BlobStorageIntegrationSettingsForm = ({
     <Form {...blobStorageForm}>
       <form
         className="space-y-3"
-        // eslint-disable-next-line @typescript-eslint/no-misused-promises
         onSubmit={blobStorageForm.handleSubmit(onSubmit)}
       >
         <FormField
@@ -344,8 +420,8 @@ const BlobStorageIntegrationSettingsForm = ({
           />
         )}
 
-        {/* Region field - Only shown for AWS S3 */}
-        {integrationType === "S3" && (
+        {/* Region field - Only shown for AWS S3 or compatible storage */}
+        {integrationType !== "AZURE_BLOB_STORAGE" && (
           <FormField
             control={blobStorageForm.control}
             name="region"
@@ -355,7 +431,11 @@ const BlobStorageIntegrationSettingsForm = ({
                 <FormControl>
                   <Input {...field} />
                 </FormControl>
-                <FormDescription>AWS region (e.g., us-east-1)</FormDescription>
+                <FormDescription>
+                  {integrationType === "S3"
+                    ? "AWS region (e.g., us-east-1)"
+                    : "S3 compatible storage region"}
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -374,7 +454,7 @@ const BlobStorageIntegrationSettingsForm = ({
                   <Switch
                     checked={field.value}
                     onCheckedChange={field.onChange}
-                    className="ml-4 mt-1"
+                    className="mt-1 ml-4"
                   />
                 </FormControl>
                 <FormDescription>
@@ -564,6 +644,68 @@ const BlobStorageIntegrationSettingsForm = ({
           )}
         />
 
+        {isBetaEnabled && (
+          <FormField
+            control={blobStorageForm.control}
+            name="exportSource"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="flex items-center gap-1.5 pt-2">
+                  Export Source
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="text-muted-foreground h-3.5 w-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      className="max-w-[350px] space-y-2 p-3"
+                    >
+                      {EXPORT_SOURCE_OPTIONS.map((option) => (
+                        <div key={option.value} className="space-y-0.5">
+                          <div className="font-medium">{option.label}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {option.description}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="border-t pt-2">
+                        <a
+                          href="https://langfuse.com/docs/integrations/export-sources"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-primary inline-flex items-center gap-1 text-xs hover:underline"
+                        >
+                          For further information see
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </FormLabel>
+                <Select onValueChange={field.onChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select data to export" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {EXPORT_SOURCE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  Choose which data sources to export to blob storage. Scores
+                  are always included.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
         {blobStorageForm.watch("exportMode") ===
           BlobStorageExportMode.FROM_CUSTOM_DATE && (
           <FormField
@@ -608,7 +750,7 @@ const BlobStorageIntegrationSettingsForm = ({
                 <Switch
                   checked={field.value}
                   onCheckedChange={field.onChange}
-                  className="ml-4 mt-1"
+                  className="mt-1 ml-4"
                 />
               </FormControl>
               <FormMessage />

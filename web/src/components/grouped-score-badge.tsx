@@ -4,11 +4,20 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/src/components/ui/hover-card";
-import { type LastUserScore, type APIScoreV2 } from "@langfuse/shared";
-import { BracesIcon, MessageCircleMoreIcon } from "lucide-react";
+import { type LastUserScore, type ScoreDomain } from "@langfuse/shared";
+import {
+  BracesIcon,
+  MessageCircleMoreIcon,
+  ExternalLinkIcon,
+} from "lucide-react";
 import { JSONView } from "@/src/components/ui/CodeJsonViewer";
+import Link from "next/link";
+import useProjectIdFromURL from "@/src/hooks/useProjectIdFromURL";
+import { type WithStringifiedMetadata } from "@/src/utils/clientSideDomainTypes";
 
-const partitionScores = <T extends APIScoreV2 | LastUserScore>(
+const partitionScores = <
+  T extends WithStringifiedMetadata<ScoreDomain> | LastUserScore,
+>(
   scores: Record<string, T[]>,
   maxVisible?: number,
 ) => {
@@ -22,7 +31,9 @@ const partitionScores = <T extends APIScoreV2 | LastUserScore>(
   return { visibleScores, hiddenScores };
 };
 
-const hasMetadata = (score: APIScoreV2 | LastUserScore) => {
+const hasMetadata = (
+  score: WithStringifiedMetadata<ScoreDomain> | LastUserScore,
+) => {
   if (!score.metadata) return false;
   try {
     const metadata =
@@ -35,7 +46,9 @@ const hasMetadata = (score: APIScoreV2 | LastUserScore) => {
   }
 };
 
-const ScoreGroupBadge = <T extends APIScoreV2 | LastUserScore>({
+const ScoreGroupBadge = <
+  T extends WithStringifiedMetadata<ScoreDomain> | LastUserScore,
+>({
   name,
   scores,
   compact,
@@ -46,6 +59,8 @@ const ScoreGroupBadge = <T extends APIScoreV2 | LastUserScore>({
   compact?: boolean;
   badgeClassName?: string;
 }) => {
+  const projectId = useProjectIdFromURL();
+
   return (
     <Badge
       variant="tertiary"
@@ -68,20 +83,32 @@ const ScoreGroupBadge = <T extends APIScoreV2 | LastUserScore>({
             {s.comment && (
               <HoverCard>
                 <HoverCardTrigger className="inline-block">
-                  <MessageCircleMoreIcon className="mb-[0.0625rem] !size-3" />
+                  <MessageCircleMoreIcon className="mb-0.25 size-3!" />
                 </HoverCardTrigger>
-                <HoverCardContent className="max-h-[50dvh] overflow-y-auto whitespace-normal break-normal">
+                <HoverCardContent className="max-h-[50dvh] overflow-y-auto text-xs break-normal whitespace-normal">
                   <p className="whitespace-pre-wrap">{s.comment}</p>
+                  {"executionTraceId" in s &&
+                    s.executionTraceId &&
+                    projectId && (
+                      <Link
+                        href={`/project/${projectId}/traces/${encodeURIComponent(s.executionTraceId)}`}
+                        className="mt-2 flex items-center gap-1 text-blue-600 hover:underline"
+                        target="_blank"
+                      >
+                        <ExternalLinkIcon className="h-3 w-3" />
+                        View execution trace
+                      </Link>
+                    )}
                 </HoverCardContent>
               </HoverCard>
             )}
             {hasMetadata(s) && (
               <HoverCard>
                 <HoverCardTrigger className="inline-block">
-                  <BracesIcon className="mb-[0.0625rem] !size-3" />
+                  <BracesIcon className="mb-0.25 size-3!" />
                 </HoverCardTrigger>
-                <HoverCardContent className="max-h-[50dvh] overflow-y-auto whitespace-normal break-normal rounded-md border-none p-0">
-                  <JSONView codeClassName="!rounded-md" json={s.metadata} />
+                <HoverCardContent className="max-h-[50dvh] overflow-y-auto rounded-md border-none p-0 text-xs break-normal whitespace-normal">
+                  <JSONView codeClassName="rounded-md!" json={s.metadata} />
                 </HoverCardContent>
               </HoverCard>
             )}
@@ -93,7 +120,9 @@ const ScoreGroupBadge = <T extends APIScoreV2 | LastUserScore>({
   );
 };
 
-export const GroupedScoreBadges = <T extends APIScoreV2 | LastUserScore>({
+export const GroupedScoreBadges = <
+  T extends WithStringifiedMetadata<ScoreDomain> | LastUserScore,
+>({
   scores,
   maxVisible,
   compact,

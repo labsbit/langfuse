@@ -32,6 +32,8 @@ export default withMiddlewares({
       const trace = await getTraceById({
         traceId,
         projectId: auth.scope.projectId,
+        clickhouseFeatureTag: "tracing-public-api",
+        preferredClickhouseService: "ReadOnly",
       });
 
       if (!trace) {
@@ -46,11 +48,13 @@ export default withMiddlewares({
           projectId: auth.scope.projectId,
           timestamp: trace?.timestamp,
           includeIO: true,
+          preferredClickhouseService: "ReadOnly",
         }),
         getScoresForTraces({
           projectId: auth.scope.projectId,
           traceIds: [traceId],
           timestamp: trace?.timestamp,
+          preferredClickhouseService: "ReadOnly",
         }),
       ]);
 
@@ -143,6 +147,7 @@ export default withMiddlewares({
     name: "Delete Single Trace",
     querySchema: DeleteTraceV1Query,
     responseSchema: DeleteTraceV1Response,
+    rateLimitResource: "trace-delete",
     fn: async ({ query, auth }) => {
       const { traceId } = query;
 

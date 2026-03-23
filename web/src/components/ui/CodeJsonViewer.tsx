@@ -19,7 +19,10 @@ import { useMarkdownContext } from "@/src/features/theming/useMarkdownContext";
 import { type MediaReturnType } from "@/src/features/media/validation";
 import { LangfuseMediaView } from "@/src/components/ui/LangfuseMediaView";
 import { MarkdownJsonViewHeader } from "@/src/components/ui/MarkdownJsonView";
-import { renderRichPromptContent } from "@/src/features/prompts/components/prompt-content-utils";
+import {
+  renderRichPromptContent,
+  usePromptReferenceProjectId,
+} from "@/src/components/ui/PromptReferences";
 import { copyTextToClipboard } from "@/src/utils/clipboard";
 
 export const IO_TABLE_CHAR_LIMIT = 10000;
@@ -35,7 +38,7 @@ export function JSONView(props: {
   collapseStringsAfterLength?: number | null;
   media?: MediaReturnType[];
   scrollable?: boolean;
-  projectIdForPromptButtons?: string;
+  borderless?: boolean;
   controlButtons?: React.ReactNode;
   externalJsonCollapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -45,6 +48,7 @@ export function JSONView(props: {
   const { resolvedTheme } = useTheme();
   const { setIsMarkdownEnabled } = useMarkdownContext();
   const capture = usePostHogClientCapture();
+  const promptReferenceProjectId = usePromptReferenceProjectId();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
 
   const collapseStringsAfterLength =
@@ -86,51 +90,63 @@ export function JSONView(props: {
     <>
       <div
         className={cn(
-          "flex gap-2 whitespace-pre-wrap break-words p-3 text-xs",
+          "io-message-content flex gap-2 text-xs wrap-break-word whitespace-pre-wrap",
+          props.borderless ? "" : "p-2",
           props.title === "assistant" || props.title === "Output"
             ? "bg-accent-light-green dark:border-accent-dark-green"
             : "",
           props.title === "system" || props.title === "Input"
             ? "bg-primary-foreground"
             : "",
-          props.scrollable ? "" : "rounded-sm border",
+          props.scrollable || props.borderless ? "" : "rounded-sm border",
           props.codeClassName,
         )}
       >
         {props.isLoading ? (
           <Skeleton className="h-3 w-3/4" />
-        ) : props.projectIdForPromptButtons ? (
-          <code className="whitespace-pre-wrap break-words">
-            {renderRichPromptContent(
-              props.projectIdForPromptButtons,
-              String(parsedJson),
-            )}
+        ) : promptReferenceProjectId && typeof parsedJson === "string" ? (
+          <code
+            className="wrap-break-word whitespace-pre-wrap"
+            dir="auto"
+            style={{ unicodeBidi: "plaintext" }}
+          >
+            {renderRichPromptContent(parsedJson)}
           </code>
         ) : (
-          <React18JsonView
-            src={parsedJson}
-            theme="github"
-            dark={resolvedTheme === "dark"}
-            collapseObjectsAfterLength={isCollapsed ? 0 : 20}
-            collapseStringsAfterLength={collapseStringsAfterLength}
-            collapseStringMode="word"
-            customizeCollapseStringUI={(fullSTring, truncated) =>
-              truncated ? (
-                <div className="opacity-50">{`\n...expand (${Math.max(fullSTring.length - collapseStringsAfterLength, 0)} more characters)`}</div>
-              ) : (
-                ""
-              )
-            }
-            displaySize={isCollapsed ? "collapsed" : "expanded"}
-            matchesURL={true}
-            customizeCopy={(node) => stringifyJsonNode(node)}
-            className="w-full"
-          />
+          <div
+            onClick={() => {
+              // If externally collapsed and user clicks to expand, sync the state
+              if (props.externalJsonCollapsed && props.onToggleCollapse) {
+                props.onToggleCollapse();
+              }
+            }}
+          >
+            <React18JsonView
+              src={parsedJson}
+              theme="github"
+              dark={resolvedTheme === "dark"}
+              collapsed={isCollapsed ? 1 : false}
+              collapseObjectsAfterLength={isCollapsed ? 0 : 20}
+              collapseStringsAfterLength={collapseStringsAfterLength}
+              collapseStringMode="word"
+              customizeCollapseStringUI={(fullSTring, truncated) =>
+                truncated ? (
+                  <div className="opacity-50">{`\n...expand (${Math.max(fullSTring.length - collapseStringsAfterLength, 0)} more characters)`}</div>
+                ) : (
+                  ""
+                )
+              }
+              displaySize={isCollapsed ? "collapsed" : "expanded"}
+              matchesURL={true}
+              customizeCopy={(node) => stringifyJsonNode(node)}
+              className="w-full"
+            />
+          </div>
         )}
       </div>
       {props.media && props.media.length > 0 && (
         <>
-          <div className="mx-3 border-t px-2 py-1 text-xs text-muted-foreground">
+          <div className="text-muted-foreground my-1 px-0 py-1 text-xs">
             Media
           </div>
           <div className="flex flex-wrap gap-2 p-4 pt-1">
@@ -168,7 +184,7 @@ export function JSONView(props: {
                 variant="ghost"
                 size="icon-xs"
                 onClick={handleToggleCollapse}
-                className="-mr-2 hover:bg-border"
+                className="hover:bg-border -mr-2"
                 title={isCollapsed ? "Expand all" : "Collapse all"}
               >
                 {isCollapsed ? (
@@ -196,6 +212,7 @@ export function JSONView(props: {
 
 export function CodeView(props: {
   content: string | React.ReactNode[] | undefined | null;
+  originalContent?: string;
   className?: string;
   defaultCollapsed?: boolean;
   title?: string;
@@ -208,9 +225,10 @@ export function CodeView(props: {
     event.preventDefault();
     setIsCopied(true);
     const content =
-      typeof props.content === "string"
+      props.originalContent ??
+      (typeof props.content === "string"
         ? props.content
-        : (props.content?.join("\n") ?? "");
+        : (props.content?.join("\n") ?? ""));
     void copyTextToClipboard(content);
     setTimeout(() => setIsCopied(false), 1000);
 
@@ -230,7 +248,7 @@ export function CodeView(props: {
     >
       <>
         {props.title ? (
-          <div className="my-1 flex flex-shrink-0 items-center justify-between pl-1">
+          <div className="my-1 flex shrink-0 items-center justify-between pl-1">
             <div className="text-sm font-medium">{props.title}</div>
             <Button
               variant="ghost"
@@ -258,7 +276,7 @@ export function CodeView(props: {
             variant="secondary"
             size="icon-xs"
             onClick={handleCopy}
-            className="absolute right-2 top-2 z-10"
+            className="absolute top-2 right-2 z-10"
           >
             {isCopied ? (
               <Check className="h-3 w-3" />
@@ -269,10 +287,12 @@ export function CodeView(props: {
         )}
         <code
           className={cn(
-            "relative flex-1 whitespace-pre-wrap break-all px-4 py-3 font-mono text-xs",
+            "relative flex-1 px-4 py-3 font-mono text-xs wrap-break-word whitespace-pre-wrap",
             isCollapsed ? `line-clamp-6` : "block",
             props.scrollable ? "overflow-y-auto" : "",
           )}
+          dir="auto"
+          style={{ unicodeBidi: "plaintext" }}
         >
           {props.content}
         </code>
@@ -293,14 +313,22 @@ export function CodeView(props: {
 }
 
 export const JsonSkeleton = ({
-  className,
   numRows = 10,
+  borderless = false,
+  className,
 }: {
   numRows?: number;
+  borderless?: boolean;
   className?: string;
 }) => {
   return (
-    <div className={cn("w-[400px] rounded-md border", className)}>
+    <div
+      className={cn(
+        "w-[400px] rounded-md",
+        borderless ? "" : "border",
+        className,
+      )}
+    >
       <div className="flex flex-col gap-1">
         {[...Array<number>(numRows)].map((_, i) => (
           <Skeleton
@@ -326,7 +354,7 @@ export function stringifyJsonNode(node: unknown) {
   try {
     return JSON.stringify(
       node,
-      (key, value) => {
+      (_key, value) => {
         switch (typeof value) {
           case "bigint":
             return String(value) + "n";

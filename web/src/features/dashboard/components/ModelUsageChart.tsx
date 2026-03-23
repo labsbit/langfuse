@@ -1,5 +1,4 @@
 import { NoDataOrLoading } from "@/src/components/NoDataOrLoading";
-import { BaseTimeSeriesChart } from "@/src/features/dashboard/components/BaseTimeSeriesChart";
 import { DashboardCard } from "@/src/features/dashboard/components/cards/DashboardCard";
 import {
   extractTimeSeriesData,
@@ -22,9 +21,13 @@ import {
 } from "@/src/features/dashboard/components/ModelSelector";
 import {
   type QueryType,
+  type ViewVersion,
   mapLegacyUiTableFilterToView,
 } from "@/src/features/query";
 import { type DatabaseRow } from "@/src/server/api/services/sqlInterface";
+import { Chart } from "@/src/features/widgets/chart-library/Chart";
+import { timeSeriesToDataPoints } from "@/src/features/dashboard/lib/chart-data-adapters";
+import { useScheduledDashboardExecuteQuery } from "@/src/hooks/useDashboardQueryScheduler";
 
 export const ModelUsageChart = ({
   className,
@@ -35,6 +38,8 @@ export const ModelUsageChart = ({
   toTimestamp,
   userAndEnvFilterState,
   isLoading = false,
+  metricsVersion,
+  schedulerId,
 }: {
   className?: string;
   projectId: string;
@@ -44,6 +49,8 @@ export const ModelUsageChart = ({
   toTimestamp: Date;
   userAndEnvFilterState: FilterState;
   isLoading?: boolean;
+  metricsVersion?: ViewVersion;
+  schedulerId?: string;
 }) => {
   const {
     allModels,
@@ -57,7 +64,14 @@ export const ModelUsageChart = ({
     userAndEnvFilterState,
     fromTimestamp,
     toTimestamp,
+    metricsVersion,
+    {
+      enabled: !isLoading,
+      queryId: `${schedulerId ?? "home:model-usage"}:all-models`,
+    },
   );
+  const hasModelSelection = selectedModels.length > 0 && allModels.length > 0;
+  const isModelUsageEnabled = !isLoading && hasModelSelection;
 
   const modelUsageQuery: QueryType = {
     view: "observations",
@@ -82,25 +96,29 @@ export const ModelUsageChart = ({
       },
     ],
     timeDimension: {
-      granularity: dashboardDateRangeAggregationSettings[agg].date_trunc,
+      granularity:
+        dashboardDateRangeAggregationSettings[agg].dateTrunc ?? "day",
     },
     fromTimestamp: fromTimestamp.toISOString(),
     toTimestamp: toTimestamp.toISOString(),
     orderBy: null,
   };
 
-  const queryResult = api.dashboard.executeQuery.useQuery(
+  const queryResult = useScheduledDashboardExecuteQuery(
     {
       projectId,
       query: modelUsageQuery,
+      version: metricsVersion,
     },
     {
-      enabled: !isLoading && selectedModels.length > 0 && allModels.length > 0,
+      enabled: isModelUsageEnabled,
       trpc: {
         context: {
           skipBatch: true,
         },
       },
+      queryId: `${schedulerId ?? "home:model-usage"}:timeseries`,
+      priority: 1001,
     },
   );
 
@@ -132,7 +150,8 @@ export const ModelUsageChart = ({
         {
           type: "datetime",
           column: "startTime",
-          temporalUnit: dashboardDateRangeAggregationSettings[agg].date_trunc,
+          temporalUnit:
+            dashboardDateRangeAggregationSettings[agg].dateTrunc ?? "day",
         },
         {
           type: "string",
@@ -143,9 +162,10 @@ export const ModelUsageChart = ({
         { column: "calculatedTotalCost", direction: "DESC", agg: "SUM" },
       ],
       queryName: "observations-cost-by-type-timeseries",
+      version: metricsVersion,
     },
     {
-      enabled: !isLoading && selectedModels.length > 0 && allModels.length > 0,
+      enabled: isModelUsageEnabled,
       trpc: {
         context: {
           skipBatch: true,
@@ -182,7 +202,8 @@ export const ModelUsageChart = ({
         {
           type: "datetime",
           column: "startTime",
-          temporalUnit: dashboardDateRangeAggregationSettings[agg].date_trunc,
+          temporalUnit:
+            dashboardDateRangeAggregationSettings[agg].dateTrunc ?? "day",
         },
         {
           type: "string",
@@ -191,9 +212,10 @@ export const ModelUsageChart = ({
       ],
       orderBy: [{ column: "totalTokens", direction: "DESC", agg: "SUM" }],
       queryName: "observations-usage-by-type-timeseries",
+      version: metricsVersion,
     },
     {
-      enabled: !isLoading && selectedModels.length > 0 && allModels.length > 0,
+      enabled: isModelUsageEnabled,
       trpc: {
         context: {
           skipBatch: true,
@@ -276,29 +298,23 @@ export const ModelUsageChart = ({
     0,
   );
 
-  // had to add this function as tremor under the hodd adds more variables
-  // to the function call which would break usdFormatter.
-  const oneValueUsdFormatter = (value: number) => {
-    return totalCostDashboardFormatted(value);
-  };
-
   const data = [
     {
       tabTitle: "Cost by model",
       data: costByModel,
       totalMetric: totalCostDashboardFormatted(totalCost),
       metricDescription: `Cost`,
-      formatter: oneValueUsdFormatter,
+      formatter: totalCostDashboardFormatted,
     },
     {
       tabTitle: "Cost by type",
       data: costByType,
       totalMetric: totalCostDashboardFormatted(totalCost),
       metricDescription: `Cost`,
-      formatter: oneValueUsdFormatter,
+      formatter: totalCostDashboardFormatted,
     },
     {
-      tabTitle: "Units by model",
+      tabTitle: "Usage by model",
       data: unitsByModel,
       totalMetric: totalTokens
         ? compactNumberFormatter(totalTokens)
@@ -306,7 +322,7 @@ export const ModelUsageChart = ({
       metricDescription: `Units`,
     },
     {
-      tabTitle: "Units by type",
+      tabTitle: "Usage by type",
       data: unitsByType,
       totalMetric: totalTokens
         ? compactNumberFormatter(totalTokens)
@@ -353,13 +369,19 @@ export const ModelUsageChart = ({
                     isLoading={isLoading || queryResult.isPending}
                   />
                 ) : (
-                  <BaseTimeSeriesChart
-                    agg={agg}
-                    data={item.data}
-                    showLegend={true}
-                    connectNulls={true}
-                    valueFormatter={item.formatter}
-                  />
+                  <div className="h-80 w-full shrink-0">
+                    <Chart
+                      chartType="LINE_TIME_SERIES"
+                      data={timeSeriesToDataPoints(item.data, agg)}
+                      rowLimit={100}
+                      chartConfig={{
+                        type: "LINE_TIME_SERIES",
+                        show_data_point_dots: false,
+                      }}
+                      valueFormatter={item.formatter}
+                      legendPosition="above"
+                    />
+                  </div>
                 )}
               </>
             ),

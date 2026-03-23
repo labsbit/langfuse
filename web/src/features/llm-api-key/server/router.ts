@@ -19,6 +19,9 @@ import {
   BedrockConfigSchema,
   VertexAIConfigSchema,
   BEDROCK_USE_DEFAULT_CREDENTIALS,
+  VERTEXAI_USE_DEFAULT_CREDENTIALS,
+  EvaluatorBlockReason,
+  getEvaluatorBlockMetadata,
 } from "@langfuse/shared";
 import { encrypt, decrypt } from "@langfuse/shared/encryption";
 import {
@@ -27,6 +30,9 @@ import {
   LLMAdapter,
   logger,
   decryptAndParseExtraHeaders,
+  blockEvaluatorConfigsInTx,
+  EvaluatorBlockSource,
+  finalizeBlockedEvaluatorConfigBlocks,
 } from "@langfuse/shared/src/server";
 import { env } from "@/src/env.mjs";
 import { TRPCError } from "@trpc/server";
@@ -34,6 +40,9 @@ import { TRPCError } from "@trpc/server";
 export function getDisplaySecretKey(secretKey: string) {
   if (secretKey === BEDROCK_USE_DEFAULT_CREDENTIALS) {
     return "Default AWS credentials";
+  }
+  if (secretKey === VERTEXAI_USE_DEFAULT_CREDENTIALS) {
+    return "Default GCP credentials (ADC)";
   }
   return secretKey.endsWith('"}')
     ? "..." + secretKey.slice(-6, -2)
@@ -61,10 +70,14 @@ async function testLLMConnection(
     if (!model) throw Error("No model found");
 
     if (params.adapter === LLMAdapter.VertexAI) {
-      const parsed = GCPServiceAccountKeySchema.safeParse(
-        JSON.parse(params.secretKey),
-      );
-      if (!parsed.success) throw Error("Invalid GCP service account JSON key");
+      // Skip validation if using ADC (Application Default Credentials)
+      if (params.secretKey !== VERTEXAI_USE_DEFAULT_CREDENTIALS) {
+        const parsed = GCPServiceAccountKeySchema.safeParse(
+          JSON.parse(params.secretKey),
+        );
+        if (!parsed.success)
+          throw Error("Invalid GCP service account JSON key");
+      }
     }
 
     const testMessages: ChatMessage[] = [
@@ -79,6 +92,7 @@ async function testLLMConnection(
     let parsedConfig: Record<string, string> | null = null;
     if (params.config && params.adapter === LLMAdapter.Bedrock) {
       const bedrockConfig = BedrockConfigSchema.parse(params.config);
+
       parsedConfig = { region: bedrockConfig.region };
     } else if (params.config && params.adapter === LLMAdapter.VertexAI) {
       const vertexAIConfig = VertexAIConfigSchema.parse(params.config);
@@ -93,13 +107,16 @@ async function testLLMConnection(
         provider: params.provider,
         model,
       },
-      baseURL: params.baseURL || undefined,
-      apiKey: params.secretKey,
-      extraHeaders: params.extraHeaders,
+      llmConnection: {
+        secretKey: encrypt(params.secretKey),
+        extraHeaders:
+          params.extraHeaders && encrypt(JSON.stringify(params.extraHeaders)),
+        baseURL: params.baseURL || undefined,
+        config: parsedConfig,
+      },
       messages: testMessages,
       streaming: false,
       maxRetries: 1,
-      config: parsedConfig,
     });
 
     return { success: true };
@@ -124,17 +141,25 @@ export const llmApiKeyRouter = createTRPCRouter({
           scope: "llmApiKeys:create",
         });
 
-        // Validate that default credentials sentinel is only allowed for Bedrock in self-hosted deployments
-        if (input.secretKey === BEDROCK_USE_DEFAULT_CREDENTIALS) {
-          const isLangfuseCloud = Boolean(
-            env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION,
-          );
+        // Validate that default credentials sentinel is only allowed for Bedrock/VertexAI in self-hosted deployments
+        const isLangfuseCloud = Boolean(env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION);
 
+        if (input.secretKey === BEDROCK_USE_DEFAULT_CREDENTIALS) {
           if (isLangfuseCloud || input.adapter !== LLMAdapter.Bedrock) {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message:
-                "Default credentials are only allowed for Bedrock in self-hosted deployments.",
+                "Default AWS credentials are only allowed for Bedrock in self-hosted deployments.",
+            });
+          }
+        }
+
+        if (input.secretKey === VERTEXAI_USE_DEFAULT_CREDENTIALS) {
+          if (isLangfuseCloud || input.adapter !== LLMAdapter.VertexAI) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Default GCP credentials (ADC) are only allowed for Vertex AI in self-hosted deployments.",
             });
           }
         }
@@ -206,34 +231,79 @@ export const llmApiKeyRouter = createTRPCRouter({
         },
       });
 
-      return ctx.prisma.$transaction(async (tx) => {
+      const result = await ctx.prisma.$transaction(async (tx) => {
         // Check if the llm api key is used for the default evaluation model
-        // If so, it will be deleted and we must invalidate all eval jobs that rely on it
         const defaultModel = await tx.defaultLlmModel.findFirst({
           where: {
             projectId: input.projectId,
           },
+          select: {
+            llmApiKeyId: true,
+          },
         });
 
+        const providerBlockedJobConfigIds = new Set<string>();
+        const defaultModelBlockedJobConfigIds = new Set<string>();
+
+        if (llmApiKey?.provider) {
+          const evalTemplates = await tx.evalTemplate.findMany({
+            where: {
+              OR: [{ projectId: input.projectId }, { projectId: null }],
+              provider: llmApiKey.provider,
+            },
+            select: {
+              id: true,
+            },
+          });
+
+          const providerBlockResult = await blockEvaluatorConfigsInTx({
+            tx,
+            projectId: input.projectId,
+            where: {
+              evalTemplateId: {
+                in: evalTemplates.map((template) => template.id),
+              },
+            },
+            blockReason: EvaluatorBlockReason.LLM_CONNECTION_MISSING,
+            blockMessage: getEvaluatorBlockMetadata(
+              EvaluatorBlockReason.LLM_CONNECTION_MISSING,
+            ).message,
+          });
+
+          for (const configId of providerBlockResult.blockedJobConfigIds) {
+            providerBlockedJobConfigIds.add(configId);
+          }
+        }
+
         if (!!defaultModel && defaultModel.llmApiKeyId === llmApiKey?.id) {
-          // Invalidate all eval jobs that rely on the default model
           const evalTemplates = await tx.evalTemplate.findMany({
             where: {
               OR: [{ projectId: input.projectId }, { projectId: null }],
               provider: null,
               model: null,
             },
+            select: {
+              id: true,
+            },
           });
 
-          await tx.jobConfiguration.updateMany({
+          const defaultModelBlockResult = await blockEvaluatorConfigsInTx({
+            tx,
+            projectId: input.projectId,
             where: {
-              evalTemplateId: { in: evalTemplates.map((et) => et.id) },
-              projectId: input.projectId,
+              evalTemplateId: {
+                in: evalTemplates.map((template) => template.id),
+              },
             },
-            data: {
-              status: "INACTIVE",
-            },
+            blockReason: EvaluatorBlockReason.DEFAULT_EVAL_MODEL_MISSING,
+            blockMessage: getEvaluatorBlockMetadata(
+              EvaluatorBlockReason.DEFAULT_EVAL_MODEL_MISSING,
+            ).message,
           });
+
+          for (const configId of defaultModelBlockResult.blockedJobConfigIds) {
+            defaultModelBlockedJobConfigIds.add(configId);
+          }
         }
 
         await tx.llmApiKeys.delete({
@@ -251,8 +321,26 @@ export const llmApiKeyRouter = createTRPCRouter({
           action: "delete",
         });
 
-        return { success: true };
+        return {
+          providerBlockedJobConfigIds: Array.from(providerBlockedJobConfigIds),
+          defaultModelBlockedJobConfigIds: Array.from(
+            defaultModelBlockedJobConfigIds,
+          ),
+        };
       });
+
+      await finalizeBlockedEvaluatorConfigBlocks({
+        projectId: input.projectId,
+        source: EvaluatorBlockSource.LLM_API_KEY_DELETION,
+        blockedByReason: {
+          [EvaluatorBlockReason.LLM_CONNECTION_MISSING]:
+            result.providerBlockedJobConfigIds,
+          [EvaluatorBlockReason.DEFAULT_EVAL_MODEL_MISSING]:
+            result.defaultModelBlockedJobConfigIds,
+        },
+      });
+
+      return { success: true };
     }),
   all: protectedProjectProcedure
     .input(
@@ -423,17 +511,25 @@ export const llmApiKeyRouter = createTRPCRouter({
           });
         }
 
-        // Validate that default credentials sentinel is only allowed for Bedrock in self-hosted deployments
-        if (input.secretKey === BEDROCK_USE_DEFAULT_CREDENTIALS) {
-          const isLangfuseCloud = Boolean(
-            env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION,
-          );
+        // Validate that default credentials sentinel is only allowed for Bedrock/VertexAI in self-hosted deployments
+        const isLangfuseCloud = Boolean(env.NEXT_PUBLIC_LANGFUSE_CLOUD_REGION);
 
+        if (input.secretKey === BEDROCK_USE_DEFAULT_CREDENTIALS) {
           if (isLangfuseCloud || input.adapter !== LLMAdapter.Bedrock) {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message:
-                "Default credentials are only allowed for Bedrock in self-hosted deployments.",
+                "Default AWS credentials are only allowed for Bedrock in self-hosted deployments.",
+            });
+          }
+        }
+
+        if (input.secretKey === VERTEXAI_USE_DEFAULT_CREDENTIALS) {
+          if (isLangfuseCloud || input.adapter !== LLMAdapter.VertexAI) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Default GCP credentials (ADC) are only allowed for Vertex AI in self-hosted deployments.",
             });
           }
         }

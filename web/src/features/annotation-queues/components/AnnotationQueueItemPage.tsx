@@ -1,6 +1,5 @@
 import { Card } from "@/src/components/ui/card";
 import { Skeleton } from "@/src/components/ui/skeleton";
-import { showSuccessToast } from "@/src/features/notifications/showSuccessToast";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { api } from "@/src/utils/api";
 import { type RouterOutput } from "@/src/utils/types";
@@ -16,6 +15,7 @@ import { useAnnotationQueueData } from "./shared/hooks/useAnnotationQueueData";
 import { useAnnotationObjectData } from "./shared/hooks/useAnnotationObjectData";
 import { TraceAnnotationProcessor } from "./processors/TraceAnnotationProcessor";
 import { SessionAnnotationProcessor } from "./processors/SessionAnnotationProcessor";
+import { ObjectNotFoundCard } from "@/src/components/ui/object-not-found-card";
 
 export const AnnotationQueueItemPage: React.FC<{
   annotationQueueId: string;
@@ -30,7 +30,6 @@ export const AnnotationQueueItemPage: React.FC<{
   >(null);
   const [seenItemIds, setSeenItemIds] = useState<string[]>([]);
   const [progressIndex, setProgressIndex] = useState(0);
-  const [hasCommentDraft, setHasCommentDraft] = useState(false);
 
   const hasAccess = useHasProjectAccess({
     projectId,
@@ -78,10 +77,6 @@ export const AnnotationQueueItemPage: React.FC<{
   const completeMutation = api.annotationQueueItems.complete.useMutation({
     onSuccess: async () => {
       utils.annotationQueueItems.invalidate();
-      showSuccessToast({
-        title: "Item marked as complete",
-        description: "The item is successfully marked as complete.",
-      });
       if (isSingleItem) {
         return;
       }
@@ -163,12 +158,6 @@ export const AnnotationQueueItemPage: React.FC<{
   };
 
   const handleNavigateNext = async () => {
-    if (hasCommentDraft) {
-      const proceed = confirm(
-        "You have an unsaved comment. Do you want to go to the next item and discard this draft?",
-      );
-      if (!proceed) return;
-    }
     if (progressIndex >= seenItemIds.length - 1) {
       const nextItem = await fetchAndLockNextMutation.mutateAsync({
         queueId: annotationQueueId,
@@ -182,13 +171,6 @@ export const AnnotationQueueItemPage: React.FC<{
 
   const handleComplete = async () => {
     if (!relevantItem) return;
-    const willNavigate = !isSingleItem && progressIndex + 1 < totalItems;
-    if (hasCommentDraft && willNavigate) {
-      const proceed = confirm(
-        "You have an unsaved comment. Do you want to complete and move to the next item, discarding the draft?",
-      );
-      if (!proceed) return;
-    }
     await completeMutation.mutateAsync({
       itemId: relevantItem.id,
       projectId,
@@ -196,11 +178,21 @@ export const AnnotationQueueItemPage: React.FC<{
   };
 
   const renderContent = () => {
+    // Handle deleted object (trace/observation/session not found)
+    if (objectData.isError && objectData.errorCode === "NOT_FOUND") {
+      return (
+        <ObjectNotFoundCard
+          type={relevantItem?.objectType ?? AnnotationQueueObjectType.TRACE}
+        />
+      );
+    }
+
+    // Handle deleted queue item
     if (!relevantItem) {
       return (
         <Card className="flex h-full w-full flex-col items-center justify-center overflow-hidden">
-          <SearchXIcon className="mb-2 h-8 w-8 text-muted-foreground" />
-          <span className="max-w-96 text-wrap text-sm text-muted-foreground">
+          <SearchXIcon className="text-muted-foreground mb-2 h-8 w-8" />
+          <span className="text-muted-foreground max-w-96 text-sm text-wrap">
             Item has been <strong>deleted from annotation queue</strong>.
             Previously added scores and underlying reference trace are
             unaffected by this action.
@@ -219,7 +211,6 @@ export const AnnotationQueueItemPage: React.FC<{
             view={view}
             configs={configs}
             projectId={projectId}
-            onHasCommentDraftChange={setHasCommentDraft}
           />
         );
       case AnnotationQueueObjectType.SESSION:
@@ -229,7 +220,6 @@ export const AnnotationQueueItemPage: React.FC<{
             data={objectData.data}
             configs={configs}
             projectId={projectId}
-            onHasCommentDraftChange={setHasCommentDraft}
           />
         );
       default:
@@ -238,12 +228,12 @@ export const AnnotationQueueItemPage: React.FC<{
   };
 
   return (
-    <div className="grid h-full grid-rows-[1fr,auto] gap-4 overflow-hidden">
+    <div className="grid h-full grid-rows-[1fr_auto] gap-4 overflow-hidden">
       {renderContent()}
-      <div className="grid h-full w-full grid-cols-1 justify-end gap-2 sm:grid-cols-[auto,min-content]">
+      <div className="grid h-full w-full grid-cols-1 justify-end gap-2 sm:grid-cols-[auto_min-content]">
         {!isSingleItem && (
           <div className="flex max-h-10 flex-row gap-2">
-            <span className="grid h-9 min-w-16 items-center rounded-md bg-muted p-1 text-center text-sm">
+            <span className="bg-muted grid h-9 min-w-16 items-center rounded-md p-1 text-center text-sm">
               {progressIndex + 1} / {totalItems}
             </span>
             <Button
@@ -253,8 +243,7 @@ export const AnnotationQueueItemPage: React.FC<{
               size="lg"
               className="px-4"
             >
-              <ArrowLeft className="mr-1 h-4 w-4" />
-              Back
+              <ArrowLeft className="h-4 w-4" />
             </Button>
           </div>
         )}
@@ -267,10 +256,7 @@ export const AnnotationQueueItemPage: React.FC<{
               className={`px-4 ${!relevantItem ? "w-full" : ""}`}
               variant="outline"
             >
-              {relevantItem?.status === AnnotationQueueStatus.PENDING
-                ? "Skip"
-                : "Next"}
-              <ArrowRight className="ml-1 h-4 w-4" />
+              <ArrowRight className="h-4 w-4" />
             </Button>
           )}
           {!!relevantItem &&
@@ -279,14 +265,14 @@ export const AnnotationQueueItemPage: React.FC<{
                 onClick={handleComplete}
                 size="lg"
                 className="w-full"
-                disabled={completeMutation.isPending || !hasAccess}
+                disabled={
+                  completeMutation.isPending || !hasAccess || objectData.isError
+                }
               >
-                {isSingleItem || progressIndex + 1 === totalItems
-                  ? "Complete"
-                  : "Complete + Next"}
+                Mark Completed
               </Button>
             ) : (
-              <div className="text-dark-gree inline-flex h-9 w-full items-center justify-center rounded-md border border-dark-green bg-light-green px-8 text-sm font-medium">
+              <div className="text-dark-gree border-dark-green bg-light-green inline-flex h-9 w-full items-center justify-center rounded-md border px-8 text-sm font-medium">
                 Completed
               </div>
             ))}

@@ -5,7 +5,8 @@
   "tasks": {
     "build": {
       "dependsOn": ["db:generate", "^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "cache": true
     },
     "start": {
       "dependsOn": ["^start"]
@@ -13,11 +14,21 @@
     "db:migrate": {
       "cache": false
     },
-    "db:deploy": {},
-    "db:reset": {},
-    "db:push": {},
-    "db:seed": {},
-    "db:seed:examples": {},
+    "db:deploy": {
+      "cache": false
+    },
+    "db:reset": {
+      "cache": false
+    },
+    "db:push": {
+      "cache": false
+    },
+    "db:seed": {
+      "cache": false
+    },
+    "db:seed:examples": {
+      "cache": false
+    },
     "dev": {
       "cache": false,
       "persistent": true,
@@ -34,14 +45,31 @@
       "dependsOn": ["db:generate"]
     },
     "db:generate": {
-      "cache": false,
+      "inputs": ["packages/shared/prisma/schema.prisma"],
+      "cache": true,
       "dependsOn": ["^db:generate"]
     },
     "lint": {
-      "cache": false
+      "cache": true,
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["db:generate"],
+      "cache": true,
+      "outputs": []
+    },
+    "build:check": {
+      "dependsOn": ["db:generate", "^build"],
+      "outputs": [".next-check/**", "!.next-check/cache/**"],
+      "cache": true
     },
     "test": {
-      "dependsOn": ["^test", "db:generate"]
+      "dependsOn": ["^test", "db:generate"],
+      "cache": true
+    },
+    "worker#dev": {
+      "cache": false,
+      "persistent": true
     }
   }
 }

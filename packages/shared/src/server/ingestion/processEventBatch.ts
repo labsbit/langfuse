@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 
-import { type Model } from "../../db";
 import { env } from "../../env";
 import {
   InvalidRequestError,
@@ -31,6 +30,10 @@ import {
   StorageServiceFactory,
 } from "../services/StorageService";
 import { isTraceIdInSample } from "./sampling";
+import {
+  isS3SlowDownError,
+  markProjectS3Slowdown,
+} from "../redis/s3SlowdownTracking";
 
 let s3StorageServiceClient: StorageService;
 
@@ -49,12 +52,6 @@ const getS3StorageServiceClient = (bucketName: string): StorageService => {
   }
   return s3StorageServiceClient;
 };
-
-// eslint-disable-next-line no-unused-vars
-export type TokenCountDelegate = (p: {
-  model: Model;
-  text: unknown;
-}) => number | undefined;
 
 /**
  * Get the delay for the event based on the event type. Uses delay if set, 0 if current UTC timestamp is not between
@@ -89,11 +86,13 @@ const getDelay = (delay: number | null, source: "api" | "otel") => {
  * @property delay - Delay in ms to wait before processing events in the batch.
  * @property source - Source of the events for metrics tracking (e.g., "otel", "api").
  * @property isLangfuseInternal - Whether the events are being ingested by Langfuse internally (e.g. traces created for prompt experiments).
+ * @property forwardToEventsTable - Whether to forward events to the staging events table for batch propagation. If undefined, falls back to environment flags.
  */
 type ProcessEventBatchOptions = {
   delay?: number | null;
   source?: "api" | "otel";
   isLangfuseInternal?: boolean;
+  forwardToEventsTable?: boolean;
 };
 
 /**
@@ -115,7 +114,15 @@ export const processEventBatch = async (
     error?: string;
   }[];
 }> => {
-  const { delay = null, source = "api", isLangfuseInternal = false } = options;
+  if (input.length === 0) {
+    return { successes: [], errors: [] };
+  }
+  const {
+    delay = null,
+    source = "api",
+    isLangfuseInternal = false,
+    forwardToEventsTable,
+  } = options;
 
   // add context of api call to the span
   const currentSpan = getCurrentSpan();
@@ -236,6 +243,20 @@ export const processEventBatch = async (
     results.forEach((result) => {
       if (result.status === "rejected") {
         s3UploadErrored = true;
+
+        // Check if this is a SlowDown error and mark the project for secondary queue
+        if (isS3SlowDownError(result.reason)) {
+          logger.warn(
+            "S3 SlowDown error during upload, marking project for secondary queue",
+            {
+              projectId: authCheck.scope.projectId,
+              error: result.reason,
+            },
+          );
+          // Fire and forget - don't await, don't block the error flow
+          markProjectS3Slowdown(authCheck.scope.projectId!).catch(() => {});
+        }
+
         logger.error("Failed to upload event to S3", {
           error: result.reason,
         });
@@ -310,6 +331,7 @@ export const processEventBatch = async (
                   eventBodyId: eventData.eventBodyId,
                   fileKey: eventData.key,
                   skipS3List: shouldSkipS3List,
+                  forwardToEventsTable,
                 },
                 authCheck: authCheck as {
                   validKey: true;
@@ -322,7 +344,7 @@ export const processEventBatch = async (
             },
             { delay: getDelay(delay, source) },
           )
-        : Promise.reject("Failed to instantiate queue");
+        : Promise.reject("Failed to instantiate ingestion queue");
     }),
   );
 

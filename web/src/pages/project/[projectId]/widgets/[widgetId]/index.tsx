@@ -18,6 +18,7 @@ export default function EditWidget() {
   };
 
   // Fetch the widget details
+  const utils = api.useUtils();
   const { data: widgetData, isLoading: isWidgetLoading } =
     api.dashboardWidgets.get.useQuery(
       {
@@ -31,6 +32,9 @@ export default function EditWidget() {
 
   // Update widget mutation
   const updateWidgetMutation = api.dashboardWidgets.update.useMutation({
+    onSettled: () => {
+      utils.dashboardWidgets.invalidate();
+    },
     onSuccess: () => {
       showSuccessToast({
         title: "Widget updated successfully",
@@ -60,6 +64,7 @@ export default function EditWidget() {
     filters: any[];
     chartType: DashboardWidgetChartType;
     chartConfig: WidgetChartConfig;
+    minVersion: number;
   }) => {
     if (!widgetId) return;
 
@@ -77,6 +82,7 @@ export default function EditWidget() {
       filters: widgetFormData.filters,
       chartType: widgetFormData.chartType,
       chartConfig: widgetFormData.chartConfig,
+      minVersion: widgetFormData.minVersion,
     });
   };
 
@@ -112,6 +118,7 @@ export default function EditWidget() {
             filters: widgetData.filters,
             chartType: widgetData.chartType,
             chartConfig: widgetData.chartConfig,
+            minVersion: widgetData.minVersion,
           }}
         />
       ) : (

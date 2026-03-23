@@ -7,7 +7,7 @@ import {
   type FilterState,
   type ColumnDefinition,
   type OrderByState,
-  type TableViewPresetDomain,
+  type TableViewPresetState,
   type TableViewPresetTableName,
   type TracingSearchType,
 } from "@langfuse/shared";
@@ -21,15 +21,20 @@ import {
   DataTableRowHeightSwitch,
   type RowHeight,
 } from "@/src/components/table/data-table-row-height-switch";
-import { Search, ChevronDown } from "lucide-react";
-import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
-import { TableDateRangeDropdown } from "@/src/components/date-range-dropdowns";
 import {
-  type TableDateRange,
-  type TableDateRangeOptions,
+  Search,
+  ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
+import { Badge } from "@/src/components/ui/badge";
+import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePostHogClientCapture";
+import { TimeRangePicker } from "@/src/components/date-picker";
+import {
+  type TimeRange,
+  TABLE_AGGREGATION_OPTIONS,
 } from "@/src/utils/date-range-utils";
 import { DataTableSelectAllBanner } from "@/src/components/table/data-table-multi-select-actions/data-table-select-all-banner";
-import { MultiSelect } from "@/src/features/filters/components/multi-select";
 import { cn } from "@/src/utils/tailwind";
 import DocPopup from "@/src/components/layouts/doc-popup";
 import { TableViewPresetsDrawer } from "@/src/components/table/table-view-presets/components/data-table-view-presets-drawer";
@@ -40,6 +45,12 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
+import { useDataTableControls } from "@/src/components/table/data-table-controls";
+import { MultiSelect as MultiSelectFilter } from "@/src/features/filters/components/multi-select";
+import {
+  DataTableRefreshButton,
+  type RefreshInterval,
+} from "@/src/components/table/data-table-refresh-button";
 
 export interface MultiSelect {
   selectAll: boolean;
@@ -52,12 +63,12 @@ export interface MultiSelect {
 }
 
 interface SearchConfig {
-  metadataSearchFields: string[];
+  metadataSearchFields?: string[];
   updateQuery: (event: string) => void;
   currentQuery?: string;
   tableAllowsFullTextSearch?: boolean;
-  setSearchType: ((newSearchType: TracingSearchType[]) => void) | undefined;
-  searchType: TracingSearchType[] | undefined;
+  setSearchType?: (newSearchType: TracingSearchType[]) => void;
+  searchType?: TracingSearchType[];
   customDropdownLabels?: {
     metadata: string;
     fullText: string;
@@ -66,7 +77,7 @@ interface SearchConfig {
 }
 
 interface TableViewControllers {
-  applyViewState: (viewData: TableViewPresetDomain) => void;
+  applyViewState: (viewData: TableViewPresetState) => void;
   selectedViewId: string | null;
   handleSetViewId: (viewId: string | null) => void;
 }
@@ -75,6 +86,13 @@ interface TableViewConfig {
   tableName: TableViewPresetTableName;
   projectId: string;
   controllers: TableViewControllers;
+}
+
+interface RefreshConfig {
+  onRefresh: () => void;
+  isRefreshing: boolean;
+  interval: RefreshInterval;
+  setInterval: (interval: RefreshInterval) => void;
 }
 
 interface DataTableToolbarProps<TData, TValue> {
@@ -93,11 +111,9 @@ interface DataTableToolbarProps<TData, TValue> {
   rowHeight?: RowHeight;
   setRowHeight?: Dispatch<SetStateAction<RowHeight>>;
   columnsWithCustomSelect?: string[];
-  selectedOption?: TableDateRangeOptions;
-  setDateRangeAndOption?: (
-    option: TableDateRangeOptions,
-    date?: TableDateRange,
-  ) => void;
+  timeRange?: TimeRange;
+  setTimeRange?: (timeRange: TimeRange) => void;
+  refreshConfig?: RefreshConfig;
   multiSelect?: MultiSelect;
   environmentFilter?: {
     values: string[];
@@ -106,7 +122,9 @@ interface DataTableToolbarProps<TData, TValue> {
   };
   orderByState?: OrderByState;
   viewConfig?: TableViewConfig;
+  filterWithAI?: boolean;
   className?: string;
+  viewModeToggle?: React.ReactNode;
 }
 
 export function DataTableToolbar<TData, TValue>({
@@ -123,28 +141,67 @@ export function DataTableToolbar<TData, TValue>({
   rowHeight,
   setRowHeight,
   columnsWithCustomSelect,
-  selectedOption,
-  setDateRangeAndOption,
+  timeRange,
+  setTimeRange,
+  refreshConfig,
   multiSelect,
   environmentFilter,
   className,
   orderByState,
   viewConfig,
+  filterWithAI = false,
+  viewModeToggle,
 }: DataTableToolbarProps<TData, TValue>) {
   const [searchString, setSearchString] = useState(
     searchConfig?.currentQuery ?? "",
   );
 
   const capture = usePostHogClientCapture();
+  const { open: controlsPanelOpen, setOpen: setControlsPanelOpen } =
+    useDataTableControls();
 
+  // Only show the toggle button when we're using the new sidebar
+  const hasNewSidebar = !filterColumnDefinition && filterState !== undefined;
   return (
     <div className={cn("grid h-fit w-full gap-0 px-2", className)}>
-      <div className="my-2 flex flex-wrap items-center gap-2 @container">
+      <div className="@container my-2 flex flex-wrap items-center gap-2">
+        {hasNewSidebar && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setControlsPanelOpen(!controlsPanelOpen)}
+            className="flex h-8 items-center gap-2 text-sm"
+          >
+            {controlsPanelOpen ? (
+              <PanelLeftClose className="h-4 w-4" />
+            ) : (
+              <PanelLeftOpen className="h-4 w-4" />
+            )}
+            <span>{controlsPanelOpen ? "Hide" : "Show"} filters</span>
+            {filterState && filterState.length > 0 && (
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                {filterState.length}
+              </Badge>
+            )}
+          </Button>
+        )}
+        {!!columnVisibility && !!columnOrder && !!viewConfig && (
+          <TableViewPresetsDrawer
+            viewConfig={viewConfig}
+            currentState={{
+              orderBy: orderByState ?? null,
+              filters: filterState ?? [],
+              columnOrder,
+              columnVisibility,
+              searchQuery: searchString,
+            }}
+          />
+        )}
         {searchConfig && (
-          <div className="flex min-w-0 max-w-64 flex-shrink-0 items-stretch">
+          <div className="flex max-w-120 shrink-0 items-stretch md:min-w-96">
             <div
               className={cn(
-                "flex h-8 flex-1 items-center border border-input bg-background pl-2",
+                "border-input bg-background flex h-8 flex-1 items-center border pl-2",
                 searchConfig.setSearchType
                   ? "rounded-l-md rounded-r-none border-r-0"
                   : "rounded-l-md rounded-r-md",
@@ -166,17 +223,24 @@ export function DataTableToolbar<TData, TValue>({
                 placeholder={
                   searchConfig.tableAllowsFullTextSearch
                     ? "Search..."
-                    : `Search (${searchConfig.metadataSearchFields.join(", ")})`
+                    : `Search (${searchConfig.metadataSearchFields?.join(", ")})`
                 }
                 value={searchString}
-                onChange={(event) => setSearchString(event.currentTarget.value)}
+                onChange={(event) => {
+                  const newValue = event.currentTarget.value;
+                  setSearchString(newValue);
+                  // If user cleared the search, update URL immediately
+                  if (newValue === "") {
+                    searchConfig.updateQuery("");
+                  }
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     capture("table:search_submit");
                     searchConfig.updateQuery(searchString);
                   }
                 }}
-                className="w-full border-none bg-transparent px-0 py-2 text-sm focus-visible:outline-none focus-visible:ring-0"
+                className="w-full border-none bg-transparent px-0 py-2 text-sm focus-visible:ring-0 focus-visible:outline-hidden"
               />
             </div>
             {searchConfig.setSearchType && (
@@ -185,7 +249,7 @@ export function DataTableToolbar<TData, TValue>({
                   <Button
                     variant="outline"
                     size="default"
-                    className="w-30 flex items-center justify-between gap-1 rounded-l-none border-l-0"
+                    className="flex w-30 items-center justify-between gap-1 rounded-l-none border-l-0"
                   >
                     <span className="flex items-center gap-1 truncate">
                       {searchConfig.tableAllowsFullTextSearch &&
@@ -200,16 +264,16 @@ export function DataTableToolbar<TData, TValue>({
                           (searchConfig.searchType ?? []).includes(
                             "content",
                           ) ? (
-                            <p className="text-xs font-normal text-primary">
+                            <p className="text-primary text-xs font-normal">
                               Searches in Input/Output and{" "}
-                              {searchConfig.metadataSearchFields.join(", ")}.
+                              {searchConfig.metadataSearchFields?.join(", ")}.
                               {!searchConfig.hidePerformanceWarning &&
                                 " For improved performance, please filter the table down."}
                             </p>
                           ) : (
-                            <p className="text-xs font-normal text-primary">
+                            <p className="text-primary text-xs font-normal">
                               Searches in{" "}
-                              {searchConfig.metadataSearchFields.join(", ")}.
+                              {searchConfig.metadataSearchFields?.join(", ")}.
                             </p>
                           )
                         }
@@ -257,14 +321,25 @@ export function DataTableToolbar<TData, TValue>({
             )}
           </div>
         )}
-        {selectedOption && setDateRangeAndOption && (
-          <TableDateRangeDropdown
-            selectedOption={selectedOption}
-            setDateRangeAndOption={setDateRangeAndOption}
+        {viewModeToggle}
+        {timeRange && setTimeRange && (
+          <TimeRangePicker
+            timeRange={timeRange}
+            onTimeRangeChange={setTimeRange}
+            timeRangePresets={TABLE_AGGREGATION_OPTIONS}
+            className="my-0 max-w-full overflow-x-auto"
+          />
+        )}
+        {refreshConfig && (
+          <DataTableRefreshButton
+            onRefresh={refreshConfig.onRefresh}
+            isRefreshing={refreshConfig.isRefreshing}
+            interval={refreshConfig.interval}
+            setInterval={refreshConfig.setInterval}
           />
         )}
         {environmentFilter && (
-          <MultiSelect
+          <MultiSelectFilter
             title="Environment"
             label="Env"
             values={environmentFilter.values}
@@ -279,22 +354,11 @@ export function DataTableToolbar<TData, TValue>({
             filterState={filterState}
             onChange={setFilterState}
             columnsWithCustomSelect={columnsWithCustomSelect}
+            filterWithAI={filterWithAI}
           />
         )}
 
         <div className="flex flex-row flex-wrap gap-2 pr-0.5 @6xl:ml-auto">
-          {!!columnVisibility && !!columnOrder && !!viewConfig && (
-            <TableViewPresetsDrawer
-              viewConfig={viewConfig}
-              currentState={{
-                orderBy: orderByState ?? null,
-                filters: filterState ?? [],
-                columnOrder,
-                columnVisibility,
-                searchQuery: searchString,
-              }}
-            />
-          )}
           {!!columnVisibility && !!setColumnVisibility && (
             <DataTableColumnVisibilityFilter
               columns={columns}

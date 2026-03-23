@@ -1,4 +1,4 @@
-import lodash from "lodash";
+import isEmpty from "lodash/isEmpty";
 import { z } from "zod/v4";
 
 import { NonEmptyString, jsonSchema } from "../../utils/zod";
@@ -58,7 +58,7 @@ export const usage = MixedUsage.nullish()
     }
 
     // if the object is empty, we return undefined
-    if (lodash.isEmpty(v)) {
+    if (isEmpty(v)) {
       return undefined;
     }
 
@@ -68,13 +68,41 @@ export const usage = MixedUsage.nullish()
   .pipe(Usage.nullish());
 
 const CostDetails = z
-  .record(z.string(), z.number().nonnegative().nullish())
+  .record(z.string(), z.unknown())
+  .nullish()
+  .transform((val) => {
+    if (!val) return val;
+
+    const result: Record<string, number> = {};
+
+    for (const [key, value] of Object.entries(val)) {
+      if (typeof value === "number" && !isNaN(value) && value >= 0) {
+        result[key] = value;
+      }
+    }
+
+    return Object.keys(result).length > 0 ? result : undefined;
+  })
   .nullish();
 
-const RawUsageDetails = z.record(
-  z.string(),
-  z.number().int().nonnegative().nullish(),
-);
+const RawUsageDetails = z.record(z.string(), z.unknown()).transform((val) => {
+  if (!val) return;
+
+  const result: Record<string, number> = {};
+
+  for (const [key, value] of Object.entries(val)) {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+      result[key] = value;
+    } else if (typeof value === "string") {
+      const parsed = parseInt(value, 10);
+      if (!isNaN(parsed) && parsed >= 0) {
+        result[key] = parsed;
+      }
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+});
 
 const OpenAICompletionUsageSchema = z
   .object({
@@ -193,24 +221,36 @@ export const UsageDetails = z
   ])
   .nullish();
 
-const INTERNAL_ENVIRONMENT_NAME_REGEX_ERROR_MESSAGE =
-  "Only alphanumeric lower case characters, hyphens, and underscores are allowed";
-
-const ENVIRONMENT_NAME_REGEX_ERROR_MESSAGE =
-  INTERNAL_ENVIRONMENT_NAME_REGEX_ERROR_MESSAGE +
-  " and it must not start with 'langfuse'";
+/** Default environment name used when no environment is specified. */
+export const DEFAULT_TRACE_ENVIRONMENT = "default" as const;
 
 const PublicEnvironmentName = z
   .string()
-  .max(40, "Maximum length is 40 characters")
-  .regex(/^(?!langfuse)[a-z0-9-_]+$/, ENVIRONMENT_NAME_REGEX_ERROR_MESSAGE)
-  .default("default");
+  .toLowerCase()
+  .transform((val) => {
+    // Strip leading "langfuse" prefix (with optional separator)
+    const stripped = val.replace(/^langfuse[-_]?/, "");
+    // Truncate to 40 chars, validate allowed chars
+    const truncated = stripped.slice(0, 40);
+    if (!truncated || !/^[a-z0-9-_]+$/.test(truncated)) {
+      return DEFAULT_TRACE_ENVIRONMENT;
+    }
+    return truncated;
+  })
+  .catch(DEFAULT_TRACE_ENVIRONMENT)
+  .default(DEFAULT_TRACE_ENVIRONMENT);
 
 const InternalEnvironmentName = z
   .string()
-  .max(40, "Maximum length is 40 characters")
-  .regex(/^[a-z0-9-_]+$/, INTERNAL_ENVIRONMENT_NAME_REGEX_ERROR_MESSAGE)
-  .default("default");
+  .transform((val) => {
+    const truncated = val.slice(0, 40);
+    if (!truncated || !/^[a-z0-9-_]+$/.test(truncated)) {
+      return DEFAULT_TRACE_ENVIRONMENT;
+    }
+    return truncated;
+  })
+  .catch(DEFAULT_TRACE_ENVIRONMENT)
+  .default(DEFAULT_TRACE_ENVIRONMENT);
 
 /** @deprecated Use PublicEnvironmentName or InternalEnvironmentName instead */
 export const EnvironmentName = PublicEnvironmentName;
@@ -480,6 +520,8 @@ const createAllIngestionSchemas = ({
     source: z
       .enum(["API", "EVAL", "ANNOTATION"])
       .default("API" as ScoreSourceType),
+    executionTraceId: z.string().nullish(),
+    queueId: z.string().nullish(),
   });
 
   const ScoreBody = applyScoreValidation(
@@ -510,6 +552,13 @@ const createAllIngestionSchemas = ({
       ),
       BaseScoreBody.merge(
         z.object({
+          value: z.string(),
+          dataType: z.literal("CORRECTION"),
+          configId: z.undefined().nullish(), // Cannot have config
+        }),
+      ),
+      BaseScoreBody.merge(
+        z.object({
           value: z.union([z.string(), z.number()]),
           dataType: z.undefined(),
           configId: z.string().nullish(),
@@ -532,6 +581,8 @@ const createAllIngestionSchemas = ({
     runId: z.string(),
     // Dataset item identification
     datasetItemId: z.string(),
+    // Dataset version: User-provided timestamp for temporal queries (can be any version)
+    datasetVersion: stringDateTime.optional(),
   });
 
   // Event schemas

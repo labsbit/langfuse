@@ -9,8 +9,6 @@ import { DataTableToolbar } from "@/src/components/table/data-table-toolbar";
 import { useRowHeightLocalStorage } from "@/src/components/table/data-table-row-height-switch";
 import useColumnOrder from "@/src/features/column-visibility/hooks/useColumnOrder";
 import { CreateOrEditAnnotationQueueButton } from "@/src/features/annotation-queues/components/CreateOrEditAnnotationQueueButton";
-import { type ScoreDataType } from "@langfuse/shared";
-import { getScoreDataTypeIcon } from "@/src/features/scores/components/ScoreDetailColumnHelpers";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +22,8 @@ import TableLink from "@/src/components/table/table-link";
 import Link from "next/link";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { DeleteAnnotationQueueButton } from "@/src/features/annotation-queues/components/DeleteAnnotationQueueButton";
+import { getScoreDataTypeIcon } from "@/src/features/scores/lib/scoreColumns";
+import { type ScoreConfigDataType } from "@langfuse/shared";
 
 type RowData = {
   key: {
@@ -33,7 +33,7 @@ type RowData = {
   description?: string;
   countCompletedItems: number;
   countPendingItems: number;
-  scoreConfigs: { id: string; name: string; dataType: ScoreDataType }[];
+  scoreConfigs: { id: string; name: string; dataType: ScoreConfigDataType }[];
   createdAt: string;
   isAssigned: boolean;
 };
@@ -66,7 +66,8 @@ export function AnnotationQueuesTable({ projectId }: { projectId: string }) {
       header: "Name",
       id: "key",
       size: 150,
-      isPinned: true,
+      isPinnedLeft: true,
+      isFixedPosition: true,
       cell: ({ row }) => {
         const key: RowData["key"] = row.getValue("key");
         return key && "id" in key && typeof key.id === "string" ? (
@@ -149,7 +150,7 @@ export function AnnotationQueuesTable({ projectId }: { projectId: string }) {
       accessorKey: "processAction",
       header: "Process",
       id: "processAction",
-      isPinned: true,
+      isFixedPosition: true,
       cell: ({ row }) => {
         const key: RowData["key"] = row.getValue("key");
         return !hasAccess ? (
@@ -174,7 +175,7 @@ export function AnnotationQueuesTable({ projectId }: { projectId: string }) {
       header: "Actions",
       id: "actions",
       size: 70,
-      isPinned: true,
+      isFixedPosition: true,
       cell: ({ row }) => {
         const key: RowData["key"] = row.getValue("key");
         return (

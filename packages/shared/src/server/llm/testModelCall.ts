@@ -1,52 +1,51 @@
-import { z as zodV3 } from "zod/v3";
 import {
   ChatMessageRole,
   ChatMessageType,
   LLMApiKeySchema,
   type ModelConfig,
 } from "./types";
-import { decrypt } from "../../encryption";
 import { fetchLLMCompletion } from "./fetchLLMCompletion";
-import { decryptAndParseExtraHeaders } from "./utils";
 import z from "zod/v4";
+
+type StructuredOutputSchema = NonNullable<
+  Parameters<typeof fetchLLMCompletion>[0]["structuredOutputSchema"]
+>;
 
 export const testModelCall = async ({
   provider,
   model,
   apiKey,
-  prompt,
   modelConfig,
+  structuredOutputSchema,
 }: {
   provider: string;
   model: string;
   apiKey: z.infer<typeof LLMApiKeySchema>;
-  prompt?: string;
   modelConfig?: ModelConfig | null;
+  structuredOutputSchema?: StructuredOutputSchema;
 }) => {
-  (
-    await fetchLLMCompletion({
-      streaming: false,
-      apiKey: decrypt(apiKey.secretKey), // decrypt the secret key
-      extraHeaders: decryptAndParseExtraHeaders(apiKey.extraHeaders),
-      baseURL: apiKey.baseURL ?? undefined,
-      messages: [
-        {
-          role: ChatMessageRole.User,
-          content: prompt ?? "mock content",
-          type: ChatMessageType.User,
-        },
-      ],
-      modelParams: {
-        provider: provider,
-        model: model,
-        adapter: apiKey.adapter,
-        ...modelConfig,
+  await fetchLLMCompletion({
+    streaming: false,
+    llmConnection: apiKey,
+    messages: [
+      {
+        role: ChatMessageRole.User,
+        content:
+          'Extract a score (1-5) and reasoning from this text: "This is a test. It worked perfectly because it matched all passing criteria."',
+        type: ChatMessageType.User,
       },
-      structuredOutputSchema: zodV3.object({
-        score: zodV3.string(),
-        reasoning: zodV3.string(),
+    ],
+    modelParams: {
+      provider: provider,
+      model: model,
+      adapter: apiKey.adapter,
+      ...modelConfig,
+    },
+    structuredOutputSchema:
+      structuredOutputSchema ??
+      z.object({
+        score: z.string(),
+        reasoning: z.string(),
       }),
-      config: apiKey.config,
-    })
-  ).completion;
+  });
 };

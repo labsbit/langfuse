@@ -51,6 +51,7 @@ export type ModelParamsContext = {
   modelParamsDescription?: string;
   customHeader?: React.ReactNode;
   layout?: "compact" | "vertical";
+  isEmbedded?: boolean;
 };
 
 export const ModelParameters: React.FC<ModelParamsContext> = ({
@@ -64,6 +65,7 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
   modelParamsDescription,
   customHeader,
   layout = "vertical",
+  isEmbedded = false,
 }) => {
   const projectId = useProjectIdFromURL();
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
@@ -107,11 +109,6 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
     );
   }
 
-  const isProviderOptionsSupported = ![
-    LLMAdapter.GoogleAIStudio,
-    LLMAdapter.VertexAI,
-  ].includes(modelParams.adapter.value);
-
   // Settings button component for reuse
   const SettingsButton = (
     <Popover open={modelSettingsOpen} onOpenChange={setModelSettingsOpen}>
@@ -124,7 +121,7 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
         >
           <Settings2 size={14} />
           {modelSettingsUsed && (
-            <div className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary" />
+            <div className="bg-primary absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full" />
           )}
         </Button>
       </PopoverTrigger>
@@ -135,7 +132,7 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
       >
         <div className="mb-3">
           <h4 className="mb-1 text-sm font-medium">Model Advanced Settings</h4>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             Configure advanced parameters for your model.
           </p>
         </div>
@@ -179,15 +176,29 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
             tooltip="An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. We generally recommend altering this or temperature but not both."
             updateModelParam={updateModelParamValue}
           />
-          {isProviderOptionsSupported ? (
-            <ProviderOptionsInput
-              value={modelParams.providerOptions.value}
-              formDisabled={formDisabled}
-              enabled={modelParams.providerOptions.enabled}
-              setModelParamEnabled={setModelParamEnabled}
-              updateModelParam={updateModelParamValue}
-            />
-          ) : null}
+          {modelParams.adapter.value === LLMAdapter.VertexAI &&
+            modelParams.maxReasoningTokens && (
+              <ModelParamsSlider
+                title="Max. Reasoning Tokens"
+                modelParamsKey="maxReasoningTokens"
+                formDisabled={formDisabled}
+                enabled={modelParams.maxReasoningTokens.enabled}
+                setModelParamEnabled={setModelParamEnabled}
+                value={modelParams.maxReasoningTokens.value}
+                min={-1}
+                max={24576}
+                step={1}
+                tooltip="Maximum tokens for model thinking/reasoning. Set to -1 for default (auto) thinking, 0 to disable. Only supported on Gemini 2.5+ models."
+                updateModelParam={updateModelParamValue}
+              />
+            )}
+          <ProviderOptionsInput
+            value={modelParams.providerOptions.value}
+            formDisabled={formDisabled}
+            enabled={modelParams.providerOptions.enabled}
+            setModelParamEnabled={setModelParamEnabled}
+            updateModelParam={updateModelParamValue}
+          />
           <LLMApiKeyComponent {...{ projectId, modelParams }} />
         </div>
       </PopoverContent>
@@ -214,7 +225,7 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
     };
 
     return (
-      <div className="flex flex-col space-y-2 pb-1 pr-1 pt-2">
+      <div className="flex flex-col space-y-2 pt-2 pr-1 pb-1">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1 space-y-1">
             <Select
@@ -244,11 +255,11 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
               </FormDescription>
             ) : undefined}
           </div>
-          <div className="flex-shrink-0">{SettingsButton}</div>
+          <div className="shrink-0">{SettingsButton}</div>
         </div>
 
         {modelParams.model.value?.startsWith("o1-") ? (
-          <p className="mt-1 text-xs text-dark-yellow">
+          <p className="text-dark-yellow mt-1 text-xs">
             For {modelParams.model.value}, the system message and the
             temperature, max_tokens and top_p setting are not supported while it
             is in beta.{" "}
@@ -267,11 +278,17 @@ export const ModelParameters: React.FC<ModelParamsContext> = ({
 
   // Vertical layout (default) - existing behavior
   return (
-    <div className="flex flex-col space-y-2 pb-1 pr-1 pt-2">
-      <div className="flex items-center justify-between">
-        {customHeader ? customHeader : <p className="font-semibold">Model</p>}
-        {SettingsButton}
-      </div>
+    <div
+      className={cn("flex flex-col", !isEmbedded && "space-y-2 pt-2 pr-1 pb-1")}
+    >
+      {!isEmbedded ? (
+        <div className="flex items-center justify-between">
+          {customHeader ? customHeader : <p className="font-semibold">Model</p>}
+          {SettingsButton}
+        </div>
+      ) : (
+        <div className="mb-2 flex justify-end">{SettingsButton}</div>
+      )}
 
       <div className="space-y-4">
         <div className="space-y-3">
@@ -365,7 +382,7 @@ const ModelParamsSelect = ({
   // Vertical layout (default) - existing behavior
   return (
     <div className="flex items-center gap-4">
-      <div className="w-24 flex-shrink-0">
+      <div className="w-24 shrink-0">
         <p
           className={cn(
             "text-xs font-semibold",
@@ -528,7 +545,7 @@ const ProviderOptionsInput = ({
           </span>
           <Tooltip>
             <TooltipTrigger>
-              <InfoIcon className="size-3 text-muted-foreground" />
+              <InfoIcon className="text-muted-foreground size-3" />
             </TooltipTrigger>
             <TooltipContent className="max-w-[200px] p-2">
               Additional options to pass to the invocation. Please check your
@@ -567,7 +584,6 @@ const ProviderOptionsInput = ({
             }}
             editable={enabled && !formDisabled}
             mode="json"
-            minHeight="none"
             lineNumbers={false}
           />
           {error && (

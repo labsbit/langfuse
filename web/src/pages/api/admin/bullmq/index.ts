@@ -1,12 +1,17 @@
 import { type NextApiRequest, type NextApiResponse } from "next";
 import { z } from "zod/v4";
 import {
+  EvalExecutionQueue,
+  LLMAsJudgeExecutionQueue,
+  SecondaryEvalExecutionQueue,
+  SecondaryIngestionQueue,
   logger,
   QueueName,
   getQueue,
   IngestionQueue,
   TraceUpsertQueue,
   IngestionEvent,
+  OtelIngestionQueue,
 } from "@langfuse/shared/src/server";
 import { AdminApiAuthService } from "@/src/ee/features/admin-api/server/adminApiAuth";
 
@@ -52,27 +57,66 @@ export default async function handler(
       return;
     }
 
-    if (!AdminApiAuthService.handleAdminAuth(req, res, false)) {
+    if (
+      !AdminApiAuthService.handleAdminAuth(req, res, {
+        isAllowedOnLangfuseCloud: true,
+      })
+    ) {
       return;
     }
 
     if (req.method === "GET") {
-      const queues: string[] = Object.values(QueueName);
-      queues.push(...IngestionQueue.getShardNames());
-      queues.push(...TraceUpsertQueue.getShardNames());
+      const queues = Array.from(
+        new Set([
+          ...Object.values(QueueName),
+          ...IngestionQueue.getShardNames(),
+          ...SecondaryIngestionQueue.getShardNames(),
+          ...EvalExecutionQueue.getShardNames(),
+          ...SecondaryEvalExecutionQueue.getShardNames(),
+          ...LLMAsJudgeExecutionQueue.getShardNames(),
+          ...TraceUpsertQueue.getShardNames(),
+          ...OtelIngestionQueue.getShardNames(),
+        ]),
+      );
       const queueCounts = await Promise.all(
         queues.map(async (queueName) => {
           try {
             let queue;
             if (queueName.startsWith(QueueName.IngestionQueue)) {
               queue = IngestionQueue.getInstance({ shardName: queueName });
+            } else if (
+              queueName.startsWith(QueueName.IngestionSecondaryQueue)
+            ) {
+              queue = SecondaryIngestionQueue.getInstance({
+                shardName: queueName,
+              });
+            } else if (queueName.startsWith(QueueName.EvaluationExecution)) {
+              queue = EvalExecutionQueue.getInstance({ shardName: queueName });
+            } else if (
+              queueName.startsWith(QueueName.EvaluationExecutionSecondaryQueue)
+            ) {
+              queue = SecondaryEvalExecutionQueue.getInstance({
+                shardName: queueName,
+              });
+            } else if (queueName.startsWith(QueueName.LLMAsJudgeExecution)) {
+              queue = LLMAsJudgeExecutionQueue.getInstance({
+                shardName: queueName,
+              });
             } else if (queueName.startsWith(QueueName.TraceUpsert)) {
               queue = TraceUpsertQueue.getInstance({ shardName: queueName });
+            } else if (queueName.startsWith(QueueName.OtelIngestionQueue)) {
+              queue = OtelIngestionQueue.getInstance({ shardName: queueName });
             } else {
               queue = getQueue(
                 queueName as Exclude<
                   QueueName,
-                  QueueName.IngestionQueue | QueueName.TraceUpsert
+                  | QueueName.IngestionQueue
+                  | QueueName.IngestionSecondaryQueue
+                  | QueueName.EvaluationExecution
+                  | QueueName.EvaluationExecutionSecondaryQueue
+                  | QueueName.LLMAsJudgeExecution
+                  | QueueName.TraceUpsert
+                  | QueueName.OtelIngestionQueue
                 >,
               );
             }
@@ -103,13 +147,35 @@ export default async function handler(
         let queue;
         if (queueName.startsWith(QueueName.IngestionQueue)) {
           queue = IngestionQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.IngestionSecondaryQueue)) {
+          queue = SecondaryIngestionQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.EvaluationExecution)) {
+          queue = EvalExecutionQueue.getInstance({ shardName: queueName });
+        } else if (
+          queueName.startsWith(QueueName.EvaluationExecutionSecondaryQueue)
+        ) {
+          queue = SecondaryEvalExecutionQueue.getInstance({
+            shardName: queueName,
+          });
+        } else if (queueName.startsWith(QueueName.LLMAsJudgeExecution)) {
+          queue = LLMAsJudgeExecutionQueue.getInstance({
+            shardName: queueName,
+          });
         } else if (queueName.startsWith(QueueName.TraceUpsert)) {
           queue = TraceUpsertQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.OtelIngestionQueue)) {
+          queue = OtelIngestionQueue.getInstance({ shardName: queueName });
         } else {
           queue = getQueue(
             queueName as Exclude<
               QueueName,
-              QueueName.IngestionQueue | QueueName.TraceUpsert
+              | QueueName.IngestionQueue
+              | QueueName.IngestionSecondaryQueue
+              | QueueName.EvaluationExecution
+              | QueueName.EvaluationExecutionSecondaryQueue
+              | QueueName.LLMAsJudgeExecution
+              | QueueName.TraceUpsert
+              | QueueName.OtelIngestionQueue
             >,
           );
         }
@@ -150,13 +216,35 @@ export default async function handler(
         let queue;
         if (queueName.startsWith(QueueName.IngestionQueue)) {
           queue = IngestionQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.IngestionSecondaryQueue)) {
+          queue = SecondaryIngestionQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.EvaluationExecution)) {
+          queue = EvalExecutionQueue.getInstance({ shardName: queueName });
+        } else if (
+          queueName.startsWith(QueueName.EvaluationExecutionSecondaryQueue)
+        ) {
+          queue = SecondaryEvalExecutionQueue.getInstance({
+            shardName: queueName,
+          });
+        } else if (queueName.startsWith(QueueName.LLMAsJudgeExecution)) {
+          queue = LLMAsJudgeExecutionQueue.getInstance({
+            shardName: queueName,
+          });
         } else if (queueName.startsWith(QueueName.TraceUpsert)) {
           queue = TraceUpsertQueue.getInstance({ shardName: queueName });
+        } else if (queueName.startsWith(QueueName.OtelIngestionQueue)) {
+          queue = OtelIngestionQueue.getInstance({ shardName: queueName });
         } else {
           queue = getQueue(
             queueName as Exclude<
               QueueName,
-              QueueName.IngestionQueue | QueueName.TraceUpsert
+              | QueueName.IngestionQueue
+              | QueueName.IngestionSecondaryQueue
+              | QueueName.EvaluationExecution
+              | QueueName.EvaluationExecutionSecondaryQueue
+              | QueueName.LLMAsJudgeExecution
+              | QueueName.TraceUpsert
+              | QueueName.OtelIngestionQueue
             >,
           );
         }

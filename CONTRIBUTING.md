@@ -35,6 +35,10 @@ A good first step is to search for open [issues](https://github.com/langfuse/lan
 
 ## Project Overview
 
+We recommend checking out DeepWiki to familiarize yourself with the project:
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/langfuse/langfuse)
+
 ### Technologies we use
 
 - Application (this repository)
@@ -90,8 +94,6 @@ The diagram below may not show all relationships if the foreign key is not defin
 
 Full database schema: [packages/shared/prisma/schema.prisma](packages/shared/prisma/schema.prisma)
 
-<img src="./packages/shared/prisma/database.svg">
-
 ## Repository Structure
 
 We built a monorepo using [pnpm](https://pnpm.io/motivation) and [turbo](https://turbo.build/repo/docs) to manage the dependencies and build process. The monorepo contains the following packages:
@@ -108,15 +110,59 @@ We built a monorepo using [pnpm](https://pnpm.io/motivation) and [turbo](https:/
 
 Requirements
 
-- Node.js 20 as specified in the [.nvmrc](.nvmrc)
+- Node.js 24 as specified in the [.nvmrc](.nvmrc)
 - Pnpm v.9.5.0
 - Docker to run the database locally
+- Clickhouse client
 
 **Note:** You can also simply run Langfuse in a **GitHub Codespace** via the provided devcontainer. To do this, click on the green "Code" button in the top right corner of the repository and select "Open with Codespaces".
 
+### Codex Cloud Setup
+
+You can also attach this repository to an OpenAI Codex cloud environment. The
+cloud environment itself is configured in the Codex UI, while the repo-owned
+bootstrap is versioned in:
+
+- `scripts/codex/setup.sh`
+- `scripts/codex/maintenance.sh`
+
+Recommended Codex UI configuration:
+
+1. Create a new cloud environment for this repository in the Codex UI.
+2. Choose a base environment with Node.js 24 support.
+3. Set the setup script to:
+
+   ```bash
+   bash scripts/codex/setup.sh
+   ```
+
+4. Set the maintenance script to:
+
+   ```bash
+   bash scripts/codex/maintenance.sh
+   ```
+
+5. Keep internet access disabled by default, or only allow the minimum domains
+   needed for your task.
+6. Add secrets and environment variables in the Codex UI instead of committing
+   them to the repository.
+
+Notes:
+
+- This Codex setup is intended for repository tasks such as code changes,
+  linting, typechecking, and targeted tests.
+- It does **not** start the full Langfuse stack. Local development still uses
+  Docker and `pnpm run dx` / `pnpm run dev`.
+- Running the full application inside Codex requires external services for
+  PostgreSQL, Redis, ClickHouse, and object storage, plus matching environment
+  variables in the Codex UI.
+
 **Steps**
 
-1. Install [golang-migrate](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate#migrate-cli) as CLI
+1. Install development dependencies:
+   - [golang-migrate](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate#migrate-cli) as CLI
+   - [clickhouse binary](https://clickhouse.com/docs/install) on macOS with brew: `brew install --cask clickhouse`
+
 2. Fork the repository and clone it locally
 
    ```bash
@@ -137,7 +183,7 @@ Requirements
     cp .env.dev.example .env
    ```
 
-4. Run the entire infrastructure in dev mode. **Note**: if you have an existing database, this command wipes it. Also, this will fail on the very first run. Please run it again.
+5. Run the entire infrastructure in dev mode. **Note**: if you have an existing database, this command wipes it. Also, this will fail on the very first run. Please run it again.
 
    ```bash
    pnpm run dx # first run only (resets db, docker containers, etc...)
@@ -146,13 +192,11 @@ Requirements
 
    You will be asked whether you want to reset Postgres and ClickHouse. Confirm both with 'Y' and press enter.
 
-5. Open the web app in your browser to start using Langfuse:
-
+6. Open the web app in your browser to start using Langfuse:
    - [Sign up page, http://localhost:3000](http://localhost:3000)
    - [Demo project, http://localhost:3000/project/7a88fb47-b4e2-43b8-a06c-a5ce950dc53a](http://localhost:3000/project/7a88fb47-b4e2-43b8-a06c-a5ce950dc53a)
 
-6. Log in as a test user:
-
+7. Log in as a test user:
    - Username: `demo@langfuse.com`
    - Password: `password`
 
@@ -176,6 +220,8 @@ pnpm run db:seed:examples
   pnpm install
   pnpm run dev
   pnpm --filter=web run dev # execute command only in one package
+  pnpm tc                   # fast typecheck all packages
+  pnpm build:check          # Full Next.js build to alternate dir (can run parallel with dev server)
   ```
 
   In the root `package.json`, you can find scripts which are executed with turbo e.g. `turbo run dev`. These scripts are executed with the help of Turbo. Turbo executes the commands in all packages taking care of the correct order of execution. Task definitions can be found in the `turbo.config.js` file.
@@ -238,19 +284,16 @@ Tests automatically create the PostgreSQL test database if it doesn't exist and 
 
 We're using Jest with in the `web` package. Therefore, if you want to provide an argument to the test runner, do it directly without an intermittent `--`.
 
-There are three types of unit tests:
+There are two types of unit tests:
 
-- `test-sync`
-- `test` (for async folder tests)
+- `test` (server tests)
 - `test-client`
 
 To run a specific test, for example the test: `"should handle special characters in prompt names"` in `prompts.v2.servertest.ts`, run:
 
 ```sh
 cd web  # or with --filter=web
-pnpm test-sync --testPathPattern="prompts\.v2\.servertest" --testNamePattern="should handle special characters in prompt names"
-# for async folder tests:
-pnpm test -- --testPathPattern="observations-api" --testNamePattern="should fetch all observations"
+pnpm test --testPathPatterns="prompts\.v2\.servertest" --testNamePattern="should handle special characters in prompt names"
 ```
 
 To run all tests:
@@ -300,10 +343,25 @@ You can use the staging environment end-to-end with the Langfuse integrations or
 
 ## Production environment
 
-When a new release is tagged on the `main` branch (excluding prereleases), it triggers a production deployment. The deployment process consists of two steps:
+We run two separate release/deployment processes:
 
-1. The Docker image is published to GitHub Packages with the version number and `latest` tag.
-2. The deployment is carried out on Langfuse Cloud. This is done by force pushing the `main` branch to the `production` branch during every release, using the [`release.yml`](.github/workflows/release.yml) GitHub Action.
+1. **Langfuse Cloud deployment (frequent):**
+   - Every commit on the `production` branch triggers an ECS deployment to Langfuse Cloud.
+   - To deploy current `main` to Langfuse Cloud, promote `main` to `production` via [`promote-main-to-production.yml`](.github/workflows/promote-main-to-production.yml) (instead of force pushing from a local machine).
+2. **Open-source release (less frequent):**
+   - The open-source Docker release process is handled via [`release.yml`](.github/workflows/release.yml) for self-hosted production users.
+
+You can trigger the Langfuse Cloud promotion in either way:
+
+1. Preferred local command:
+
+```bash
+pnpm run release:cloud
+```
+
+This wraps the GitHub CLI trigger and performs preflight checks (main branch/sync checks and migration diff checks against `production`) before dispatching the workflow.
+
+2. GitHub UI: open **Actions** -> **Promote Main to Production** -> **Run workflow**, then set `confirm=promote`.
 
 ## Theming
 

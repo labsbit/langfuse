@@ -10,5 +10,7 @@
       "Bash(tail:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": ["sequential-thinking"]
 }
